@@ -1,0 +1,19 @@
+Python : 3.11.4
+PaddleOCR : 3.4.0
+PaddlePaddle : 3.2.2
+python-multipart:0.0.22
+Pillow : 12.1.1
+
+"dependencies": {
+    "next": "16.1.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.30",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.1.6",
+    "typescript": "5.9.3"
+  }
