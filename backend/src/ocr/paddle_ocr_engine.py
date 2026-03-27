@@ -98,7 +98,7 @@ class PaddleOCREngine:
 
     def _preprocess_image(self, image_path: str) -> str:
         """이미지 긴 변이 MAX_SIDE를 초과하면 비율 유지 리사이즈."""
-        img = Image.open(image_path)
+        img = Image.open(image_path).convert("RGB")
         max_dim = max(img.size)  # width와 height 중 큰 값
 
         # 최대 크기 이하이면 원본 그대로 사용

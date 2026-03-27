@@ -19,8 +19,8 @@ if %errorlevel% neq 0 (
     timeout /t 2 /nobreak >nul
 )
 
-echo [3/5] Starting Python OCR (port 8000)...
-start "MORA-OCR" cmd /k "cd /d %~dp0backend && py -3 app.py"
+echo [3/5] Starting Python OCR (port 8000) with auto-reload...
+start "MORA-OCR" cmd /k "cd /d %~dp0backend && py -3 -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload"
 
 echo [4/5] Starting Spring Boot (port 8080)...
 start "MORA-Spring" cmd /k "cd /d %~dp0spring && mvn spring-boot:run"

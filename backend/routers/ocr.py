@@ -57,6 +57,11 @@ import uuid
 import shutil
 from pathlib import Path
 
+import torch
+import torch.nn as nn
+from torchvision import transforms, models
+from PIL import Image
+
 from fastapi import APIRouter, File, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -67,23 +72,83 @@ router = APIRouter()
 
 # 업로드 디렉토리 경로 설정 (프로젝트 루트/uploads)
 UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)  # 디렉토리가 없으면 생성
+
+# ===== 분류 모델 로드 (서버 시작 시 1회) =====
+CLASSIFIER_PATH = Path(__file__).resolve().parent.parent / "models" / "image_classifier.pt"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+checkpoint = torch.load(CLASSIFIER_PATH, map_location=DEVICE, weights_only=True)
+MODEL_CLASSES = checkpoint["classes"]  # ["namecard", "poster", "recipt"]
+
+classifier = models.resnet18(weights=None)
+classifier.fc = nn.Sequential(
+    nn.Dropout(0.3),
+    nn.Linear(classifier.fc.in_features, len(MODEL_CLASSES)),
+)
+classifier.load_state_dict(checkpoint["model_state"])
+classifier.to(DEVICE)
+classifier.eval()
+
+classify_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+])
+
+# 분류 모델 클래스명 → DB enum 폴더명 매핑
+CLASS_TO_TYPE = {
+    "namecard": "BUSINESS_CARD",
+    "poster": "POSTER",
+    "recipt": "RECEIPT",
+}
+
+CONFIDENCE_THRESHOLD = 0.8
+
+
+def classify_image(image_path: str) -> tuple[str, float]:
+    """이미지를 분류하여 (document_type, confidence)를 반환."""
+    image = Image.open(image_path).convert("RGB")
+    input_tensor = classify_transform(image).unsqueeze(0).to(DEVICE)
+
+    with torch.no_grad():
+        outputs = classifier(input_tensor)
+        probs = torch.softmax(outputs, dim=1)[0]
+
+    max_idx = probs.argmax().item()
+    confidence = probs[max_idx].item()
+    model_class = MODEL_CLASSES[max_idx]
+    document_type = CLASS_TO_TYPE.get(model_class, "ETC")
+
+    # 디버그 로그
+    print(f"[분류] {model_class} ({confidence:.4f}) → {document_type}")
+    for i, cls in enumerate(MODEL_CLASSES):
+        print(f"  {cls}: {probs[i]*100:.1f}%")
+
+    return document_type, confidence
 
 
 @router.post("/scan")
 async def scan(file: UploadFile = File(...)):
-    """이미지를 받아 OCR + 규칙 기반 파싱 결과를 반환."""
+    """이미지를 받아 분류 → OCR → 파싱 결과를 반환."""
 
     # 원본 확장자를 유지하면서 UUID 기반 고유 파일명 생성
     suffix = Path(file.filename).suffix
     img_name = f"{uuid.uuid4().hex}{suffix}"
-    img_path = UPLOAD_DIR / img_name
 
-    # 업로드된 파일 스트림을 디스크에 저장
-    with open(img_path, "wb") as f:
+    # 임시로 UPLOAD_DIR에 저장 (분류 후 이동)
+    temp_path = UPLOAD_DIR / img_name
+    with open(temp_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
     try:
+        # 이미지 분류
+        document_type, confidence = classify_image(str(temp_path))
+
+        # 종류별 폴더로 이동
+        type_dir = UPLOAD_DIR / document_type
+        img_path = type_dir / img_name
+        shutil.move(str(temp_path), str(img_path))
+
         # OCR 파이프라인 실행 → 이미지에서 텍스트 블록 추출
         ocr_result = pipeline.run(str(img_path))
         text_blocks = ocr_result.get("raw_blocks", [])
@@ -92,15 +157,19 @@ async def scan(file: UploadFile = File(...)):
         parsed_result = parsing_skill.execute(text_blocks)
         parsed = parsed_result["parsed"]
 
-        # 성공 응답: 파싱 결과 + 원본 블록 + 이미지 URL
+        # 성공 응답: 분류 결과 + 파싱 결과 + 원본 블록 + 이미지 URL
         return JSONResponse(content={
             "success": True,
             "data": {
+                "type": document_type,
+                "confidence": round(confidence, 4),
                 "parsed": parsed,
                 "raw_blocks": text_blocks,
-                "image_url": f"/uploads/{img_name}",
+                "image_url": f"/uploads/{document_type}/{img_name}",
             }
         })
     except Exception as e:
-        # 에러 발생 시 500 응답
+        # 에러 시 임시 파일 정리
+        if temp_path.exists():
+            temp_path.unlink()
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
