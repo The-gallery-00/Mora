@@ -77,6 +77,9 @@ public class JwtUtil {
     public JwtUtil(
             @Value("${app.jwt-secret}") String secret,
             @Value("${app.jwt-expiration}") long expiration) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("JWT_SECRET must be configured");
+        }
         // 키를 최소 32바이트(256bit)로 보장 — HS256 요구사항
         byte[] keyBytes = new byte[32];
         byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
