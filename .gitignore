@@ -1,0 +1,62 @@
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== IDE / 에디터 =====
+.idea/
+.vscode/
+*.swp
+*.swo
+.metadata/
+*.iml
+
+# ===== 환경변수 (비밀키 유출 방지) =====
+.env
+.env.*
+!.env.example
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+
+# ===== Node.js / Next.js =====
+node_modules/
+.next/
+out/
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.tsbuildinfo
+
+# ===== Java / Spring =====
+target/
+*.class
+*.jar
+*.war
+*.log
+.gradle/
+build/
+
+# ===== 업로드 파일 (이미지 등) =====
+uploads/*
+!uploads/.gitkeep
+
+# ===== Claude Code =====
+.claude/
+
+# ===== 기타 =====
+*.pem
+coverage/
+.vercel
