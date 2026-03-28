@@ -36,8 +36,8 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { scanCard, saveCard } from '@/lib/api'
-import type { BusinessCard } from '@/types'
+import { scanImage, scanCard, saveCard } from '@/lib/api'
+import type { BusinessCard, DocumentType, ScanResult } from '@/types'
 
 export default function UploadPage() {
   // === 파일 및 미리보기 관련 상태 ===
@@ -50,6 +50,11 @@ export default function UploadPage() {
   const [imageUrl, setImageUrl] = useState('')                 // 서버에 저장된 이미지 경로
   const [isSaved, setIsSaved] = useState(false)                    // 저장 완료 여부
   const [isDragOver, setIsDragOver] = useState(false)              // 드래그 오버 상태 (UI 피드백용)
+
+  // === 문서 분류 관련 상태 ===
+  const [documentType, setDocumentType] = useState<DocumentType>('ETC')
+  const [confidence, setConfidence] = useState(0)
+  const [ocrScanResult, setOcrScanResult] = useState<ScanResult | null>(null)
 
   // === OCR 결과를 사용자가 수정할 수 있는 편집 필드 ===
   const [editName, setEditName] = useState('')
@@ -77,24 +82,47 @@ export default function UploadPage() {
     if (f && f.type.startsWith('image/')) handleFile(f)
   }, [handleFile])
 
-  // OCR 스캔 실행 — scanCard API 호출 후 결과를 편집 필드에 세팅
+  // OCR 스캔 실행 — scanImage API 호출 후 분류 결과 + 파싱 결과 세팅
   const handleScan = async () => {
     if (!file) return
     setIsLoading(true)
     setError(null)
 
-    const res = await scanCard(file)
+    const res = await scanImage(file)
     setIsLoading(false)
 
     if (res.success) {
-      // OCR 결과를 각 편집 필드에 초기값으로 설정
-      setScanResult(res.data)
-      setEditName(res.data.name)
-      setEditCompany(res.data.company)
-      setEditPosition(res.data.position)
-      setEditPhone(res.data.phone)
-      setEditEmail(res.data.email)
-      setImageUrl(res.data.imageUrl || '')
+      const { type, confidence: conf, parsed, rawTexts, imageUrl: imgUrl } = res.data
+      setOcrScanResult(res.data)
+      setDocumentType(type)
+      setConfidence(conf)
+      setImageUrl(imgUrl)
+
+      // 명함일 경우 기존 편집 필드에 세팅
+      if (type === 'BUSINESS_CARD') {
+        const cardData: BusinessCard = {
+          name: parsed.name || '',
+          company: parsed.company || '',
+          position: parsed.position || '',
+          phone: parsed.phone || parsed.fax || '',
+          email: parsed.email || '',
+          raw_texts: rawTexts,
+          imageUrl: imgUrl,
+        }
+        setScanResult(cardData)
+        setEditName(cardData.name)
+        setEditCompany(cardData.company)
+        setEditPosition(cardData.position)
+        setEditPhone(cardData.phone)
+        setEditEmail(cardData.email)
+      } else {
+        // 명함이 아닌 경우에도 scanResult 세팅 (UI 전환용)
+        setScanResult({
+          name: '', company: '', position: '', phone: '', email: '',
+          raw_texts: rawTexts,
+          imageUrl: imgUrl,
+        })
+      }
     } else {
       setError(res.error)
     }
@@ -120,9 +148,11 @@ export default function UploadPage() {
     }
   }
 
-  // 모든 상태를 초기화하여 새 명함 업로드를 시작
+  // 모든 상태를 초기화하여 새 업로드를 시작
   const handleReset = () => {
-    setFile(null); setPreview(null); setScanResult(null); setIsSaved(false); setError(null); setImageUrl('')
+    setFile(null); setPreview(null); setScanResult(null); setOcrScanResult(null)
+    setIsSaved(false); setError(null); setImageUrl('')
+    setDocumentType('ETC'); setConfidence(0)
   }
 
   return (
@@ -174,7 +204,7 @@ export default function UploadPage() {
               background: '#FF8A3D', color: 'white', fontSize: 15, fontWeight: 600,
               cursor: isLoading ? 'not-allowed' : 'pointer', opacity: isLoading ? 0.5 : 1,
             }}>
-              {isLoading ? '스캔 중...' : '명함 스캔하기'}
+              {isLoading ? '스캔 중...' : '이미지 스캔하기'}
             </button>
           )}
         </>
@@ -209,7 +239,33 @@ export default function UploadPage() {
               위 사진을 보고 틀린 부분이 있으면 수정한 후 저장하세요.
             </p>
 
-            {/* 각 필드를 라벨-인풋 쌍으로 렌더링 */}
+            {/* 문서 종류 선택 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <span style={{ width: 72, fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'right', flexShrink: 0 }}>
+                문서 종류
+              </span>
+              <select
+                value={documentType}
+                onChange={(e) => setDocumentType(e.target.value as DocumentType)}
+                style={{
+                  flex: 1, padding: '14px 16px', borderRadius: 12,
+                  border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
+                  fontSize: 14, color: 'white', outline: 'none',
+                }}
+              >
+                <option value="BUSINESS_CARD" style={{ background: '#1a1a2e', color: 'white' }}>명함</option>
+                <option value="POSTER" style={{ background: '#1a1a2e', color: 'white' }}>포스터</option>
+                <option value="RECEIPT" style={{ background: '#1a1a2e', color: 'white' }}>영수증</option>
+                <option value="TICKET" style={{ background: '#1a1a2e', color: 'white' }}>티켓</option>
+                <option value="ETC" style={{ background: '#1a1a2e', color: 'white' }}>기타</option>
+              </select>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', flexShrink: 0 }}>
+                {(confidence * 100).toFixed(1)}%
+              </span>
+            </div>
+
+            {/* 명함일 때: 기존 편집 필드 */}
+            {documentType === 'BUSINESS_CARD' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {[
                 { label: '이름', value: editName, set: setEditName },
@@ -233,6 +289,33 @@ export default function UploadPage() {
                 </div>
               ))}
             </div>
+            )}
+
+            {/* 명함이 아닐 때: 파싱된 필드 표시 */}
+            {documentType !== 'BUSINESS_CARD' && ocrScanResult && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+                {documentType === 'POSTER' && '포스터 파싱 결과'}
+                {documentType === 'RECEIPT' && '영수증 파싱 결과'}
+                {documentType === 'TICKET' && '티켓 파싱 결과'}
+                {documentType === 'ETC' && '분류되지 않은 문서'}
+              </p>
+              {Object.entries(ocrScanResult.parsed).map(([key, value]) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <span style={{ width: 72, fontSize: 13, color: 'rgba(255,255,255,0.35)', textAlign: 'right', flexShrink: 0 }}>
+                    {key}
+                  </span>
+                  <span style={{
+                    flex: 1, padding: '14px 16px', borderRadius: 12,
+                    border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.03)',
+                    fontSize: 14, color: 'white',
+                  }}>
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+            )}
 
             {/* OCR 원본 텍스트 블록 — AI가 추출한 원시 텍스트 조각들을 태그 형태로 표시 */}
             {scanResult.raw_texts && scanResult.raw_texts.length > 0 && (

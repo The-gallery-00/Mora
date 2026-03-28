@@ -1,4 +1,4 @@
-import type { BusinessCard, ApiResponse } from '@/types'
+import type { BusinessCard, ApiResponse, ScanResult } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
@@ -7,8 +7,8 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** 이미지 파일을 서버에 보내 OCR 수행 */
-export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
+/** 이미지 파일을 서버에 보내 분류 + OCR 수행 */
+export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
   try {
     const formData = new FormData()
     formData.append('file', file)
@@ -32,17 +32,35 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
     return {
       success: true,
       data: {
-        name: parsed.name || '',
-        company: parsed.company || '',
-        position: parsed.position || '',
-        phone: parsed.phone || parsed.fax || '',
-        email: parsed.email || '',
-        raw_texts: raw.map((b: { text: string }) => b.text),
+        type: inner.type || json.data?.type || 'ETC',
+        confidence: inner.confidence || json.data?.confidence || 0,
+        parsed,
+        rawTexts: raw.map((b: { text: string }) => b.text),
         imageUrl: inner.image_url || json.data?.image_url || '',
       },
     }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 이미지 파일을 서버에 보내 OCR 수행 (명함 전용, 하위 호환) */
+export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
+  const res = await scanImage(file)
+  if (!res.success) return res
+
+  const { parsed, rawTexts, imageUrl } = res.data
+  return {
+    success: true,
+    data: {
+      name: parsed.name || '',
+      company: parsed.company || '',
+      position: parsed.position || '',
+      phone: parsed.phone || parsed.fax || '',
+      email: parsed.email || '',
+      raw_texts: rawTexts,
+      imageUrl,
+    },
   }
 }
 
