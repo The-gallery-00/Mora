@@ -53,7 +53,8 @@ os.environ["FLAGS_enable_pir_in_executor"] = "0"
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 from src.pipeline.extract_pipeline import BusinessCardPipeline
-from src.classifier.rule_based import classify_all_blocks
+from src.classifier.rule_based import classify_all_blocks, classify_all_blocks_for_type
+from src.classifier.field_schema import DOCUMENT_FIELDS
 
 # "unknown" 라벨의 블록은 최종 결과에서 제외됨
 UNKNOWN_LABEL = "unknown"
@@ -61,29 +62,21 @@ UNKNOWN_LABEL = "unknown"
 
 class ParsingSkill:
     """OCR 텍스트 블록을 명함 필드로 분류/파싱."""
-    def execute(self, text_blocks: list[dict]) -> dict:
-        # 빈 입력이면 빈 결과 반환
+    def execute(self, text_blocks: list[dict], document_type: str = "BUSINESS_CARD") -> dict:
         if not text_blocks:
             return {"classified_blocks": [], "parsed": {}}
 
-        # 규칙 기반 분류기로 각 블록에 필드(field)를 부여
-        classified = classify_all_blocks(text_blocks)
+        classified = classify_all_blocks_for_type(text_blocks, document_type)
 
-        # 같은 필드가 여러 개일 때 confidence가 가장 높은 블록만 선택
         best = {}
         for block in classified:
             field = block["field"]
             if field == UNKNOWN_LABEL:
-                continue  # unknown은 건너뜀
+                continue
             if field not in best or block["confidence"] > best[field]["confidence"]:
                 best[field] = block
 
-        # 내부 필드명 → 프론트엔드에서 사용하는 외부 필드명으로 매핑
-        field_map = {
-            "person_name": "name", "company_name": "company",
-            "job_title": "position", "phone_number": "phone",
-            "fax_number": "fax", "email": "email",
-        }
+        field_map = DOCUMENT_FIELDS.get(document_type, {})
         parsed = {field_map.get(k, k): v["text"] for k, v in best.items()}
 
         return {"classified_blocks": classified, "parsed": parsed}

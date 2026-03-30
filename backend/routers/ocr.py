@@ -67,6 +67,7 @@ from fastapi.responses import JSONResponse
 
 # services.py에서 싱글톤으로 생성된 파이프라인과 파싱 스킬을 가져옴
 from services import pipeline, parsing_skill
+from src.classifier.field_schema import DOCUMENT_FIELDS, FIELD_LABELS_KO
 
 router = APIRouter()
 
@@ -154,16 +155,21 @@ async def scan(file: UploadFile = File(...)):
         text_blocks = ocr_result.get("raw_blocks", [])
 
         # 텍스트 블록을 명함 필드(이름, 회사, 전화 등)로 분류/파싱
-        parsed_result = parsing_skill.execute(text_blocks)
+        parsed_result = parsing_skill.execute(text_blocks, document_type=document_type)
         parsed = parsed_result["parsed"]
 
-        # 성공 응답: 분류 결과 + 파싱 결과 + 원본 블록 + 이미지 URL
+        fields = {
+            ext: FIELD_LABELS_KO.get(ext, ext)
+            for ext in DOCUMENT_FIELDS.get(document_type, {}).values()
+        }
+
         return JSONResponse(content={
             "success": True,
             "data": {
                 "type": document_type,
                 "confidence": round(confidence, 4),
                 "parsed": parsed,
+                "fields": fields,
                 "raw_blocks": text_blocks,
                 "image_url": f"/uploads/{document_type}/{img_name}",
             }
