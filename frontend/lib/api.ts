@@ -1,4 +1,4 @@
-import type { BusinessCard, ApiResponse, ScanResult } from '@/types'
+import type { BusinessCard, ApiResponse, ScanResult, DocumentType } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
@@ -27,6 +27,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
     // Spring 백엔드가 Python OCR 응답을 한 번 더 감싸는 구조를 풀어서 추출
     const inner = json.data?.data || json.data || {}
     const parsed = inner.parsed || json.data?.parsed || {}
+    const fields = inner.fields || json.data?.fields || {}
     const raw = inner.raw_blocks || json.data?.raw_blocks || []
 
     return {
@@ -35,6 +36,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
         type: inner.type || json.data?.type || 'ETC',
         confidence: inner.confidence || json.data?.confidence || 0,
         parsed,
+        fields,
         rawTexts: raw.map((b: { text: string }) => b.text),
         imageUrl: inner.image_url || json.data?.image_url || '',
       },
@@ -54,9 +56,9 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
     success: true,
     data: {
       name: parsed.name || '',
-      company: parsed.company || '',
-      position: parsed.position || '',
-      phone: parsed.phone || parsed.fax || '',
+      company: parsed.company_name || parsed.company || '',
+      position: parsed.job_title || parsed.position || '',
+      phone: parsed.mobile_phone || parsed.phone || '',
       email: parsed.email || '',
       raw_texts: rawTexts,
       imageUrl,
@@ -64,20 +66,33 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   }
 }
 
-/** 명함 데이터를 DB에 저장 */
-export async function saveCard(card: BusinessCard, imageUrl: string = ''): Promise<ApiResponse<{ id: string }>> {
+/** 문서 데이터를 DB에 저장 (문서 종류 + 동적 필드) */
+export async function saveCard(
+  documentType: DocumentType,
+  fields: Record<string, string>,
+  imageUrl: string = '',
+  rawTexts: string[] = [],
+): Promise<ApiResponse<{ id: string }>> {
   try {
+    // Spring 쪽이 새 스키마를 지원할 때까지 기존 필드 매핑도 함께 전달
+    const body: Record<string, unknown> = {
+      documentType,
+      imageUrl,
+      rawOcrText: rawTexts.join('\n'),
+      // 기존 Spring 엔드포인트 호환용 (명함 필드)
+      name: fields.name || '',
+      company: fields.company_name || '',
+      position: fields.job_title || '',
+      phone: fields.mobile_phone || fields.contact_phone || '',
+      email: fields.email || fields.contact_email || '',
+      // 새 필드 전체를 fields 객체로도 전달
+      fields,
+    }
+
     const res = await fetch(`${API_BASE}/api/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-      body: JSON.stringify({
-        name: card.name,
-        company: card.company,
-        position: card.position,
-        phone: card.phone,
-        email: card.email,
-        imageUrl,
-      }),
+      body: JSON.stringify(body),
     })
     const json = await res.json().catch(() => null)
 
@@ -151,7 +166,6 @@ export async function searchCards(query: string): Promise<ApiResponse<BusinessCa
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `검색 실패 (${res.status})` }
     }
-    // 백엔드 ApiResponse는 data 필드로 감싸서 반환
     return { success: true, data: json.data || [] }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
