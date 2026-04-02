@@ -1,4 +1,4 @@
-# ── MORA Backend (Python OCR Service) ──
+# MORA Backend (Python OCR Service)
 # Python 3.11+
 
 # OCR
@@ -16,5 +16,5 @@ Pillow==12.1.1
 # Environment
 python-dotenv==1.2.2
 
-# ── Install ──
+# Install
 # pip install -r requirements.txt

@@ -1,14 +1,14 @@
-# ── OCR Engine ──
+# OCR Engine
 paddlepaddle
 paddleocr
 opencv-python
 Pillow
 numpy
 
-# ── API Server ──
+# API Server
 fastapi
 uvicorn
 python-multipart
 
-# ── Config ──
+# Config
 python-dotenv
