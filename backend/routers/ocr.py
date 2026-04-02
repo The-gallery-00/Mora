@@ -147,6 +147,7 @@ async def scan(file: UploadFile = File(...)):
 
         # 종류별 폴더로 이동
         type_dir = UPLOAD_DIR / document_type
+        type_dir.mkdir(parents=True, exist_ok=True)
         img_path = type_dir / img_name
         shutil.move(str(temp_path), str(img_path))
 
