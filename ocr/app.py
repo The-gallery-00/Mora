@@ -121,4 +121,4 @@ def root():
 if __name__ == "__main__":
     # 직접 실행 시 uvicorn ASGI 서버로 기동 (개발 모드)
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
