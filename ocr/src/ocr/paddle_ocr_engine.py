@@ -151,10 +151,15 @@ class PaddleOCREngine:
                     "block_index": len(text_blocks),  # 0부터 시작하는 순서 인덱스
                 })
 
+        # OCR 처리에 사용된 이미지의 실제 크기 (bbox 좌표 기준)
+        processed_img = Image.open(processed_path)
+        ocr_width, ocr_height = processed_img.size
+
         return {
             "image_file": Path(image_path).name,
             "ocr_engine": "PaddleOCR",
             "text_blocks": text_blocks,
+            "image_size": {"width": ocr_width, "height": ocr_height},
         }
 
     def extract_and_save(self, image_path: str, output_dir: str) -> dict:

@@ -173,6 +173,7 @@ async def scan(file: UploadFile = File(...)):
                 "fields": fields,
                 "raw_blocks": text_blocks,
                 "image_url": f"/uploads/{document_type}/{img_name}",
+                "image_size": ocr_result.get("image_size"),
             }
         })
     except Exception as e:

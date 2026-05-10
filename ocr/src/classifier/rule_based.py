@@ -306,8 +306,9 @@ def _normalize_phone(number: str) -> str:
 def extract_clean_value(text: str, field: str) -> str:
     """분류된 필드에서 해당 값만 깨끗하게 추출 (키워드/노이즈 제거)."""
     if field == "email":
-        # "E-mail.", "Email:", "e-mail " 등 접두사 키워드 제거 후 추출
-        cleaned = re.sub(r"(?i)e[-.]?mail\s*[.:)]\s*", "", text)
+        # "E-mail.", "Email:", "E.", "e:" 등 접두사 키워드 제거 후 추출
+        cleaned = re.sub(r"(?i)^e[-.]?mail\s*[.:)]\s*", "", text.strip())
+        cleaned = re.sub(r"(?i)^e\s*[.:)]\s*", "", cleaned)
         match = EMAIL_PATTERN.search(cleaned)
         return match.group() if match else text
     if field in ("mobile_phone", "office_phone", "contact_phone"):
@@ -331,33 +332,77 @@ def extract_clean_value(text: str, field: str) -> str:
     return text
 
 
-def _split_multi_number_blocks(text_blocks: list[dict]) -> list[dict]:
+def _split_multi_pattern_blocks(text_blocks: list[dict]) -> list[dict]:
     """
-    하나의 블록에 팩스+전화 등 여러 번호가 합쳐진 경우 분리.
-    예: "Fax 053-289-4021Mobile 010-5140-3662" → 2개 블록으로 분리
+    하나의 블록에 여러 종류의 정보(전화+팩스, 팩스+이메일 등)가
+    합쳐진 경우 각각 별도 블록으로 분리.
+
+    예:
+      "F.053-813-1212E.ukneeon@naver.com"
+        → ["F.053-813-1212", "E.ukneeon@naver.com"]
+      "T.053-216-1613 HP.010-3051-5765"
+        → ["T.053-216-1613", "HP.010-3051-5765"]
+      "Fax 053-289-4021Mobile 010-5140-3662"
+        → ["Fax 053-289-4021", "Mobile 010-5140-3662"]
     """
+    # 전화번호 → 이메일/URL 순서로 매칭 (전화번호를 먼저 확정해야
+    # 이메일 패턴이 전화번호 숫자를 로컬파트로 삼키는 것을 방지)
+    _PHONE_PATTERNS = [MOBILE_PATTERN, LANDLINE_PATTERN]
+    _OTHER_PATTERNS = [EMAIL_PATTERN, LINK_PATTERN]
+
     expanded = []
     for block in text_blocks:
         text = block["text"].strip()
 
-        # 텍스트 내 모든 유선/휴대폰 번호를 찾음
-        landline_matches = list(LANDLINE_PATTERN.finditer(text))
-        mobile_matches = list(MOBILE_PATTERN.finditer(text))
-        all_matches = landline_matches + mobile_matches
+        # Step 1: 전화번호 매치를 먼저 확정
+        phone_matches = []
+        for pattern in _PHONE_PATTERNS:
+            for m in pattern.finditer(text):
+                phone_matches.append((m.start(), m.end()))
 
-        # 번호가 2개 이상이면 각각 별도 블록으로 분리
-        if len(all_matches) >= 2:
+        # 겹치는 전화번호 매치 제거
+        phone_matches.sort(key=lambda x: x[0])
+        phone_filtered = []
+        for start, end in phone_matches:
+            if not phone_filtered or start >= phone_filtered[-1][1]:
+                phone_filtered.append((start, end))
+
+        # Step 2: 전화번호 영역을 마스킹한 텍스트에서 이메일/URL 매칭
+        # (전화번호 숫자가 이메일 로컬파트로 잡히는 것을 방지)
+        masked = list(text)
+        for ps, pe in phone_filtered:
+            for i in range(ps, pe):
+                masked[i] = '\x00'
+        masked_text = ''.join(masked)
+
+        other_matches = []
+        for pattern in _OTHER_PATTERNS:
+            for m in pattern.finditer(masked_text):
+                other_matches.append((m.start(), m.end()))
+
+        # 전체 매치 합치기
+        all_matches = phone_filtered + other_matches
+        all_matches.sort(key=lambda x: x[0])
+        filtered = []
+        for start, end in all_matches:
+            if not filtered or start >= filtered[-1][1]:
+                filtered.append((start, end))
+
+        # 패턴이 2개 이상이면 분리
+        if len(filtered) >= 2:
             segments = []
-            match_positions = sorted(
-                [(m.start(), m.end(), m.group()) for m in all_matches],
-                key=lambda x: x[0]
-            )
-            for i, (start, end, number) in enumerate(match_positions):
+            for i, (start, end) in enumerate(filtered):
+                # 이 매치 앞의 접두사 텍스트 (키워드 라벨)를 포함
                 if i == 0:
                     prefix = text[:start]
                 else:
-                    prefix = text[match_positions[i-1][1]:start]
-                segment_text = (prefix + number).strip()
+                    prefix = text[filtered[i - 1][1]:start]
+                # 마지막 매치이면 뒤에 남은 텍스트도 포함
+                if i == len(filtered) - 1:
+                    suffix = text[end:]
+                else:
+                    suffix = ""
+                segment_text = (prefix + text[start:end] + suffix).strip()
                 if segment_text:
                     segments.append(segment_text)
 
@@ -605,8 +650,8 @@ def classify_all_blocks(text_blocks: list[dict]) -> list[dict]:
     명함 전용. 전체 텍스트 블록을 순회하며 분류 결과를 추가.
     전처리: 복합 블록 분리 → 2-pass 분류 → 값 추출.
     """
-    # 전처리: 번호가 합쳐진 블록 분리
-    text_blocks = _split_multi_number_blocks(text_blocks)
+    # 전처리: 여러 정보가 합쳐진 블록 분리 (전화+이메일, 팩스+전화 등)
+    text_blocks = _split_multi_pattern_blocks(text_blocks)
 
     # 1st pass: 확실한 패턴 먼저 분류 (이메일, 휴대폰)
     # → 2nd pass에서 이미 분류된 블록을 문맥으로 참조할 수 있게 함

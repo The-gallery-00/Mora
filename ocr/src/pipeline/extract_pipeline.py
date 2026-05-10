@@ -154,6 +154,7 @@ class BusinessCardPipeline:
             "classified_blocks": classified,
             "result": result,
             "result_korean": result_korean,
+            "image_size": ocr_result.get("image_size"),
         }
 
     def run_and_save(self, image_path: str, output_dir: str) -> dict:
