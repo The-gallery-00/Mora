@@ -108,6 +108,31 @@ CLASS_TO_TYPE = {
 
 CONFIDENCE_THRESHOLD = 0.8
 
+# 티켓 감지 키워드 — OCR 텍스트에 이 키워드가 있으면 티켓으로 판별
+TICKET_KEYWORDS = [
+    # 공통
+    "탑승권", "승차권", "편명", "항공편명", "좌석번호", "좌석",
+    "탑승구", "탑승장", "호차", "열차정보", "열차번호",
+    # 열차
+    "KTX", "SRT", "ITX", "무궁화", "새마을",
+    # 항공 코드
+    "OZ", "LJ", "TW", "7C", "BX", "ZE", "RS",  # 한국 항공사 코드
+    "ICN", "GMP", "CJU", "PUS", "TAE", "KPO",   # 한국 공항 코드
+    "LAX", "NRT", "KIX", "CXR",                  # 해외 공항 코드
+    # 맥락
+    "출발일", "출발시간", "도착", "구간",
+    "예약번호", "승차권 번호", "e티켓",
+    "모바일 탑승권", "스마트티켓",
+]
+
+
+def _detect_ticket_from_ocr(text_blocks: list[dict]) -> bool:
+    """OCR 텍스트 블록에서 티켓 키워드를 감지."""
+    all_text = " ".join(b["text"] for b in text_blocks).upper()
+    match_count = sum(1 for kw in TICKET_KEYWORDS if kw.upper() in all_text)
+    # 2개 이상 키워드 매칭 시 티켓으로 판별
+    return match_count >= 2
+
 
 def classify_image(image_path: str) -> tuple[str, float]:
     """이미지를 분류하여 (document_type, confidence)를 반환."""
@@ -180,8 +205,17 @@ async def scan(file: UploadFile = File(...)):
     hash_index = _load_hash_index()
 
     try:
-        # 이미지 분류
-        document_type, confidence = classify_image(str(temp_path))
+        # Step 1: OCR 먼저 실행 (분류보다 선행)
+        ocr_result = pipeline.run(str(temp_path))
+        text_blocks = ocr_result.get("raw_blocks", [])
+
+        # Step 2: OCR 텍스트로 티켓 감지 → 감지되면 ML 분류 스킵
+        if _detect_ticket_from_ocr(text_blocks):
+            document_type = "TICKET"
+            confidence = 1.0
+            print(f"[분류] 티켓 키워드 감지 → TICKET (ML 분류 스킵)")
+        else:
+            document_type, confidence = classify_image(str(temp_path))
 
         # 종류별 폴더로 이동
         type_dir = UPLOAD_DIR / document_type
@@ -189,11 +223,7 @@ async def scan(file: UploadFile = File(...)):
         img_path = type_dir / img_name
         shutil.move(str(temp_path), str(img_path))
 
-        # OCR 파이프라인 실행 → 이미지에서 텍스트 블록 추출
-        ocr_result = pipeline.run(str(img_path))
-        text_blocks = ocr_result.get("raw_blocks", [])
-
-        # 텍스트 블록을 명함 필드(이름, 회사, 전화 등)로 분류/파싱
+        # Step 3: 텍스트 블록을 문서 종류에 맞게 파싱
         parsed_result = parsing_skill.execute(text_blocks, document_type=document_type)
         parsed = parsed_result["parsed"]
 
