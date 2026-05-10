@@ -59,6 +59,8 @@
 """
 규칙 기반 분류기: 정규식 + 휴리스틱으로 텍스트 블록을 스키마 필드에 매핑.
 """
+from __future__ import annotations
+
 import re
 
 # ========== 공통 패턴 ==========
@@ -176,14 +178,32 @@ STORE_KEYWORDS = ["상호", "매장", "가맹점"]
 
 # ========== 티켓 전용 패턴 ==========
 
-# 교통수단 키워드
-TRANSPORT_KEYWORDS = [
-    "KTX", "SRT", "ITX", "무궁화", "새마을",
-    "비행기", "항공", "AIR", "AIR",
-    "고속버스", "시외버스", "버스",
-    "기차", "열차", "철도",
-    "선박", "페리",
-]
+# 교통수단 키워드 → 정규화된 교통수단명 매핑
+TRANSPORT_NORMALIZE = {
+    # KTX
+    "KTX": "KTX",
+    # SRT
+    "SRT": "SRT",
+    # ITX
+    "ITX": "ITX",
+    # 무궁화
+    "무궁화": "무궁화",
+    # 고속버스
+    "고속버스": "고속버스", "시외버스": "고속버스",
+    # 비행기 (항공사명, 항공 키워드, IATA 코드)
+    "항공": "비행기", "AIR": "비행기", "비행기": "비행기",
+    "아시아나": "비행기", "대한항공": "비행기", "진에어": "비행기",
+    "티웨이": "비행기", "제주항공": "비행기", "에어부산": "비행기",
+    "에어서울": "비행기", "이스타": "비행기", "플라이강원": "비행기",
+    "탑승권": "비행기",
+    # IATA 항공사 코드
+    "OZ": "비행기", "KE": "비행기", "LJ": "비행기",
+    "TW": "비행기", "7C": "비행기", "BX": "비행기",
+    "ZE": "비행기", "RS": "비행기",
+}
+
+# 역호환용 키워드 리스트 (티켓 감지에 사용)
+TRANSPORT_KEYWORDS = list(TRANSPORT_NORMALIZE.keys())
 
 # 출발 키워드
 DEPARTURE_KEYWORDS = ["출발", "탑승", "departure", "from", "승차"]
@@ -306,8 +326,9 @@ def _normalize_phone(number: str) -> str:
 def extract_clean_value(text: str, field: str) -> str:
     """분류된 필드에서 해당 값만 깨끗하게 추출 (키워드/노이즈 제거)."""
     if field == "email":
-        # "E-mail.", "Email:", "e-mail " 등 접두사 키워드 제거 후 추출
-        cleaned = re.sub(r"(?i)e[-.]?mail\s*[.:)]\s*", "", text)
+        # "E-mail.", "Email:", "E.", "e:" 등 접두사 키워드 제거 후 추출
+        cleaned = re.sub(r"(?i)^e[-.]?mail\s*[.:)]\s*", "", text.strip())
+        cleaned = re.sub(r"(?i)^e\s*[.:)]\s*", "", cleaned)
         match = EMAIL_PATTERN.search(cleaned)
         return match.group() if match else text
     if field in ("mobile_phone", "office_phone", "contact_phone"):
@@ -322,6 +343,29 @@ def extract_clean_value(text: str, field: str) -> str:
     if field == "website" or field == "website_url":
         match = LINK_PATTERN.search(text)
         return match.group() if match else text
+    # 티켓: 교통수단은 정규화된 이름으로 반환
+    if field == "transport_type":
+        upper = text.upper()
+        for kw, normalized in TRANSPORT_NORMALIZE.items():
+            if kw.upper() in upper:
+                return normalized
+        return text.strip()
+    # 티켓 필드: "라벨 : 값" 패턴에서 값만 추출
+    _TICKET_FIELDS = (
+        "departure_location", "departure_date",
+        "departure_time", "arrival_location", "arrival_date", "arrival_time",
+    )
+    if field in _TICKET_FIELDS:
+        label_match = re.match(r"^[\-▶►●·※\[\]\s]*(.+?)\s*[:：]\s*(.+)$", text.strip())
+        if label_match:
+            return label_match.group(2).strip()
+        return text.strip()
+    # departure_location이지만 여정(출발-도착) 합쳐진 경우 → 출발지만 반환
+    # (도착지는 _split_ticket_compound_fields에서 별도 블록으로 분리됨)
+    if field == "_route_departure":
+        return text.strip()
+    if field == "_route_arrival":
+        return text.strip()
     if field == "person_name":
         # 공백 포함된 한국어 이름("이 응 환") → 공백 제거("이응환")
         name_no_space = re.sub(r"\s+", "", text.strip())
@@ -331,33 +375,77 @@ def extract_clean_value(text: str, field: str) -> str:
     return text
 
 
-def _split_multi_number_blocks(text_blocks: list[dict]) -> list[dict]:
+def _split_multi_pattern_blocks(text_blocks: list[dict]) -> list[dict]:
     """
-    하나의 블록에 팩스+전화 등 여러 번호가 합쳐진 경우 분리.
-    예: "Fax 053-289-4021Mobile 010-5140-3662" → 2개 블록으로 분리
+    하나의 블록에 여러 종류의 정보(전화+팩스, 팩스+이메일 등)가
+    합쳐진 경우 각각 별도 블록으로 분리.
+
+    예:
+      "F.053-813-1212E.ukneeon@naver.com"
+        → ["F.053-813-1212", "E.ukneeon@naver.com"]
+      "T.053-216-1613 HP.010-3051-5765"
+        → ["T.053-216-1613", "HP.010-3051-5765"]
+      "Fax 053-289-4021Mobile 010-5140-3662"
+        → ["Fax 053-289-4021", "Mobile 010-5140-3662"]
     """
+    # 전화번호 → 이메일/URL 순서로 매칭 (전화번호를 먼저 확정해야
+    # 이메일 패턴이 전화번호 숫자를 로컬파트로 삼키는 것을 방지)
+    _PHONE_PATTERNS = [MOBILE_PATTERN, LANDLINE_PATTERN]
+    _OTHER_PATTERNS = [EMAIL_PATTERN, LINK_PATTERN]
+
     expanded = []
     for block in text_blocks:
         text = block["text"].strip()
 
-        # 텍스트 내 모든 유선/휴대폰 번호를 찾음
-        landline_matches = list(LANDLINE_PATTERN.finditer(text))
-        mobile_matches = list(MOBILE_PATTERN.finditer(text))
-        all_matches = landline_matches + mobile_matches
+        # Step 1: 전화번호 매치를 먼저 확정
+        phone_matches = []
+        for pattern in _PHONE_PATTERNS:
+            for m in pattern.finditer(text):
+                phone_matches.append((m.start(), m.end()))
 
-        # 번호가 2개 이상이면 각각 별도 블록으로 분리
-        if len(all_matches) >= 2:
+        # 겹치는 전화번호 매치 제거
+        phone_matches.sort(key=lambda x: x[0])
+        phone_filtered = []
+        for start, end in phone_matches:
+            if not phone_filtered or start >= phone_filtered[-1][1]:
+                phone_filtered.append((start, end))
+
+        # Step 2: 전화번호 영역을 마스킹한 텍스트에서 이메일/URL 매칭
+        # (전화번호 숫자가 이메일 로컬파트로 잡히는 것을 방지)
+        masked = list(text)
+        for ps, pe in phone_filtered:
+            for i in range(ps, pe):
+                masked[i] = '\x00'
+        masked_text = ''.join(masked)
+
+        other_matches = []
+        for pattern in _OTHER_PATTERNS:
+            for m in pattern.finditer(masked_text):
+                other_matches.append((m.start(), m.end()))
+
+        # 전체 매치 합치기
+        all_matches = phone_filtered + other_matches
+        all_matches.sort(key=lambda x: x[0])
+        filtered = []
+        for start, end in all_matches:
+            if not filtered or start >= filtered[-1][1]:
+                filtered.append((start, end))
+
+        # 패턴이 2개 이상이면 분리
+        if len(filtered) >= 2:
             segments = []
-            match_positions = sorted(
-                [(m.start(), m.end(), m.group()) for m in all_matches],
-                key=lambda x: x[0]
-            )
-            for i, (start, end, number) in enumerate(match_positions):
+            for i, (start, end) in enumerate(filtered):
+                # 이 매치 앞의 접두사 텍스트 (키워드 라벨)를 포함
                 if i == 0:
                     prefix = text[:start]
                 else:
-                    prefix = text[match_positions[i-1][1]:start]
-                segment_text = (prefix + number).strip()
+                    prefix = text[filtered[i - 1][1]:start]
+                # 마지막 매치이면 뒤에 남은 텍스트도 포함
+                if i == len(filtered) - 1:
+                    suffix = text[end:]
+                else:
+                    suffix = ""
+                segment_text = (prefix + text[start:end] + suffix).strip()
                 if segment_text:
                     segments.append(segment_text)
 
@@ -476,19 +564,39 @@ def classify_text_block_for_receipt(text: str) -> str:
 # 티켓 분류기
 # ════════════════════════════════════════════
 
+# 캡쳐 티켓에서 "라벨 : 값" 패턴 매칭용 정규식
+# 접두사: -, ▶, ►, ●, ·, ※, [] 등 제거
+_LABEL_VALUE_PATTERN = re.compile(r"^[\-▶►●·※\[\]\s]*(.+?)\s*[:：]\s*(.+)$")
+
+# 라벨 → 필드 매핑 (캡쳐 티켓 카카오 알림톡/앱 형태)
+_TICKET_LABEL_MAP = {
+    # 긴 키워드를 먼저 배치해야 "출발"이 "출발시간"보다 먼저 매칭되는 것을 방지
+    # 교통수단/편명
+    "항공편명": "transport_type", "항공편": "transport_type",
+    "편명": "transport_type",
+    # 출발 (긴 것 먼저)
+    "출발일시": "departure_date", "출발시간": "departure_time",
+    "출발일": "departure_date", "출발지": "departure_location",
+    "출발": "departure_location",
+    # 도착 (긴 것 먼저)
+    "도착시간": "arrival_time", "도착일": "arrival_date",
+    "도착지": "arrival_location", "도착": "arrival_location",
+    # 구간/여정
+    "구간": "departure_location", "여정": "departure_location",
+    # 기타
+    "좌석번호": "unknown", "좌석": "unknown",
+    "예약번호": "unknown",
+    "탑승객명": "unknown", "탑승객": "unknown",
+    "승객명": "unknown", "승객": "unknown",
+}
+
+
 def classify_text_block_for_ticket(text: str) -> str:
     """
     티켓용 단일 텍스트 블록을 스키마 필드로 분류.
 
-    판별 순서:
-    1) 교통수단 키워드 → transport_type
-    2) 출발 키워드 + 시간 → departure_time
-    3) 도착 키워드 + 시간 → arrival_time
-    4) 출발 키워드 + 날짜 → departure_date
-    5) 도착 키워드 + 날짜 → arrival_date
-    6) 출발 키워드 (장소) → departure_location
-    7) 도착 키워드 (장소) → arrival_location
-    8) 해당 없음 → unknown
+    캡쳐 티켓 지원을 위해 "라벨 : 값" 패턴을 우선 처리하고,
+    매칭 안 되면 키워드 기반 분류로 폴백.
     """
     text_stripped = text.strip()
     if not text_stripped:
@@ -496,50 +604,186 @@ def classify_text_block_for_ticket(text: str) -> str:
 
     lower = text_stripped.lower()
 
-    # 1) 교통수단 키워드 확인
+    # 캡쳐 티켓은 "라벨:값" 패턴 안에 있는 정보만 신뢰.
+    # 단독 블록(UI 시계, 전화번호, 날짜 헤더 등)은 전부 노이즈.
+
+    # 1) "라벨 : 값" 패턴 매칭
+    label_match = _LABEL_VALUE_PATTERN.match(text_stripped)
+    if label_match:
+        label = label_match.group(1).strip().rstrip("-").strip()
+        for key, field in _TICKET_LABEL_MAP.items():
+            if key in label:
+                return field
+
+    # 2) 라벨 없이 교통수단 키워드가 포함된 블록 (예: "SRT 373", "KTX-산천 292")
     for kw in TRANSPORT_KEYWORDS:
-        if kw.lower() in lower:
+        if kw.upper() in text_stripped.upper():
             return "transport_type"
 
-    has_date = DATE_PATTERN.search(text_stripped)
-    has_time = TIME_PATTERN.search(text_stripped)
-
-    is_departure = any(kw in lower for kw in DEPARTURE_KEYWORDS)
-    is_arrival = any(kw in lower for kw in ARRIVAL_KEYWORDS)
-
-    # 2) 출발 + 시간 → departure_time
-    if is_departure and has_time:
-        return "departure_time"
-
-    # 3) 도착 + 시간 → arrival_time
-    if is_arrival and has_time:
-        return "arrival_time"
-
-    # 4) 출발 + 날짜 → departure_date
-    if is_departure and has_date:
-        return "departure_date"
-
-    # 5) 도착 + 날짜 → arrival_date
-    if is_arrival and has_date:
-        return "arrival_date"
-
-    # 6) 출발 키워드만 있으면 장소로 추정
-    if is_departure:
-        return "departure_location"
-
-    # 7) 도착 키워드만 있으면 장소로 추정
-    if is_arrival:
-        return "arrival_location"
-
-    # 8) 날짜만 단독 → 출발일로 기본 분류
-    if has_date:
-        return "departure_date"
-
-    # 9) 시간만 단독 → 출발 시간으로 기본 분류
-    if has_time:
-        return "departure_time"
-
+    # 나머지는 전부 unknown (UI 노이즈)
     return "unknown"
+
+
+# 여정 구분자: "포항경주(KPO) - 제주(CJU)", "TAE-CXR", "서울 → 부산"
+_ROUTE_SEPARATORS = re.compile(r"\s*[-–—→>]\s*")
+
+# 날짜+시간 분리: "2025.10.10(금)10:45", "2025-12-22(월)19:40"
+_DATETIME_SPLIT = re.compile(
+    r"^(.*?\d{4}[.\-/]\s*\d{1,2}[.\-/]\s*\d{1,2}(?:\s*\([가-힣]\))?)\s*(.*)$"
+)
+
+
+# 한국 기차역 화이트리스트 (SRT + KTX + ITX + 무궁화)
+_STATION_NAMES = {
+    # SRT
+    "수서", "동탄", "평택지제", "천안아산", "오송", "대전", "김천구미",
+    "동대구", "신경주", "경주", "울산", "부산",
+    # KTX 추가
+    "서울", "용산", "광명", "영등포", "수원", "천안", "조치원",
+    "세종", "서대전", "익산", "전주", "남원", "광주송정", "광주",
+    "목포", "나주", "순천", "여수엑스포", "여수", "포항", "강릉",
+    "정동진", "동해", "삼척", "진주", "마산", "창원", "창원중앙",
+    "밀양", "구포", "부전", "태화강",
+    # 수도권/기타
+    "청량리", "왕십리", "상봉", "양평", "원주", "제천", "충주",
+    "안동", "영주", "춘천", "가평", "남춘천",
+}
+
+# "역명(시간)" 패턴: "동대구(05:48)", "수서(07:35)"
+_STATION_TIME = re.compile(r"([가-힣]{2,5})\s*\((\d{1,2}:\d{2})\)")
+
+# 시간 단독 패턴: "21:00", "13:23"
+_TIME_ONLY = re.compile(r"^\d{1,2}:\d{2}$")
+
+
+def _try_layout_based_ticket(text_blocks: list[dict]) -> list[dict] | None:
+    """
+    SRT/KTX 네이버 예매 승차권 레이아웃 기반 파싱.
+    역명(한글 2~5자)과 시간(HH:MM)이 왼쪽/오른쪽에 쌍으로 배치된 패턴을 감지.
+    성공하면 분류 결과 반환, 아니면 None.
+    """
+    # 역명 블록 찾기
+    stations = []
+    times = []
+    date_block = None
+    transport_block = None
+
+    for b in text_blocks:
+        text = b["text"].strip()
+        bbox = b.get("bbox")
+        if not bbox:
+            continue
+        x = bbox[0][0]
+
+        # "역명(시간)" 합쳐진 패턴 (SRT 앱: "동대구(05:48)")
+        st_matches = _STATION_TIME.findall(text)
+        if st_matches:
+            for station, time_str in st_matches:
+                if station in _STATION_NAMES:
+                    stations.append({"text": station, "x": x, "block": b})
+                    times.append({"text": time_str, "x": x, "block": b})
+                    x += 200  # 같은 블록 내 두 번째 매치는 오른쪽으로 취급
+            continue
+
+        # 역명 단독 (네이버 예매: "수서", "동대구")
+        if text in _STATION_NAMES:
+            stations.append({"text": text, "x": x, "block": b})
+        elif _TIME_ONLY.match(text):
+            times.append({"text": text, "x": x, "block": b})
+        elif DATE_PATTERN.search(text) and len(text) >= 8 and not date_block:
+            date_block = b
+        elif any(kw.upper() in text.upper() for kw in TRANSPORT_KEYWORDS) and not transport_block:
+            transport_block = b
+
+    # 역명 2개 + 시간 2개가 있어야 레이아웃 기반 파싱
+    if len(stations) < 2 or len(times) < 2:
+        return None
+
+    # x 좌표로 정렬 → 왼쪽이 출발, 오른쪽이 도착
+    stations.sort(key=lambda s: s["x"])
+    times.sort(key=lambda t: t["x"])
+
+    results = []
+    base = lambda b: {"confidence": b.get("confidence", 0.0), "bbox": b.get("bbox"), "block_index": b["block_index"]}
+
+    # 출발역/도착역
+    results.append({**base(stations[0]["block"]), "text": stations[0]["text"], "field": "departure_location"})
+    results.append({**base(stations[-1]["block"]), "text": stations[-1]["text"], "field": "arrival_location"})
+
+    # 출발시간/도착시간
+    results.append({**base(times[0]["block"]), "text": times[0]["text"], "field": "departure_time"})
+    results.append({**base(times[-1]["block"]), "text": times[-1]["text"], "field": "arrival_time"})
+
+    # 날짜
+    if date_block:
+        date_text = date_block["text"].strip()
+        results.append({**base(date_block), "text": date_text, "field": "departure_date"})
+        # 기차/버스: 도착시간이 출발시간보다 크면(자정 안 넘김) 도착일 = 출발일
+        dep_time = times[0]["text"]  # "21:00"
+        arr_time = times[-1]["text"]  # "22:42"
+        dep_h = int(dep_time.split(":")[0])
+        arr_h = int(arr_time.split(":")[0])
+        if arr_h >= dep_h:  # 자정 안 넘김
+            results.append({**base(date_block), "text": date_text, "field": "arrival_date"})
+
+    # 교통수단
+    if transport_block:
+        transport_name = extract_clean_value(transport_block["text"], "transport_type")
+        results.append({**base(transport_block), "text": transport_name, "field": "transport_type"})
+
+    # 나머지 블록은 unknown
+    classified_indices = {r["block_index"] for r in results}
+    for b in text_blocks:
+        if b["block_index"] not in classified_indices:
+            results.append({**base(b), "text": b["text"].strip(), "field": "unknown"})
+
+    return results
+
+
+def _classify_and_split_ticket_blocks(text_blocks: list[dict]) -> list[dict]:
+    """
+    티켓 블록을 분류한 뒤 복합 필드를 분리.
+    1) SRT/KTX 레이아웃 기반 파싱 시도
+    2) 실패 시 라벨:값 기반 파싱 (카카오 알림톡 등)
+       - 여정(출발-도착 합쳐진 것) → departure_location + arrival_location
+       - 출발일시(날짜+시간 합쳐진 것) → departure_date + departure_time
+    """
+    # SRT/KTX 레이아웃 기반 먼저 시도
+    layout_result = _try_layout_based_ticket(text_blocks)
+    if layout_result:
+        return layout_result
+
+    # 라벨:값 기반 파싱 (카카오 알림톡 등)
+    results = []
+    for block in text_blocks:
+        text = block["text"].strip()
+        field = classify_text_block_for_ticket(text)
+        clean_text = extract_clean_value(text, field)
+        base = {
+            "confidence": block.get("confidence", 0.0),
+            "bbox": block.get("bbox"),
+            "block_index": block["block_index"],
+        }
+
+        # 여정 분리: "포항경주(KPO) - 제주(CJU)" → 출발지 + 도착지
+        if field == "departure_location":
+            parts = _ROUTE_SEPARATORS.split(clean_text)
+            if len(parts) >= 2:
+                results.append({**base, "text": parts[0].strip(), "field": "departure_location"})
+                results.append({**base, "text": parts[-1].strip(), "field": "arrival_location"})
+                continue
+
+        # 출발일시 분리: "2025.10.10(금)10:45" → 날짜 + 시간
+        if field in ("departure_date", "departure_time"):
+            dt_match = _DATETIME_SPLIT.match(clean_text)
+            if dt_match and dt_match.group(2).strip():
+                results.append({**base, "text": dt_match.group(1).strip(), "field": "departure_date"})
+                results.append({**base, "text": dt_match.group(2).strip(), "field": "departure_time"})
+                continue
+
+        results.append({**base, "text": clean_text, "field": field})
+
+    return results
 
 
 # ════════════════════════════════════════════
@@ -568,6 +812,8 @@ def classify_all_blocks_for_type(text_blocks: list[dict], document_type: str = "
         classify_fn = classify_text_block_for_receipt
     elif document_type == "TICKET":
         classify_fn = classify_text_block_for_ticket
+        # 티켓은 분류 후 복합 필드 분리 후처리 필요
+        return _classify_and_split_ticket_blocks(text_blocks)
     else:
         # ETC: 스키마 미정의 → 모든 블록을 unknown으로
         return [{"text": b["text"], "confidence": b.get("confidence", 0.0),
@@ -580,8 +826,12 @@ def classify_all_blocks_for_type(text_blocks: list[dict], document_type: str = "
     for block in text_blocks:
         text = block["text"].strip()
         field = classify_fn(text)
-        # 전화번호/이메일/URL만 extract_clean_value로 노이즈 제거
-        clean_fields = ("contact_phone", "contact_email", "website_url", "total_amount")
+        # 전화번호/이메일/URL + 티켓 필드 → extract_clean_value로 노이즈 제거
+        clean_fields = (
+            "contact_phone", "contact_email", "website_url", "total_amount",
+            "transport_type", "departure_location", "departure_date",
+            "departure_time", "arrival_location", "arrival_date", "arrival_time",
+        )
         clean_text = extract_clean_value(text, field) if field in clean_fields else text
         entry = {"text": clean_text, "confidence": block.get("confidence", 0.0),
                  "bbox": block.get("bbox"), "block_index": block["block_index"], "field": field}
@@ -605,8 +855,8 @@ def classify_all_blocks(text_blocks: list[dict]) -> list[dict]:
     명함 전용. 전체 텍스트 블록을 순회하며 분류 결과를 추가.
     전처리: 복합 블록 분리 → 2-pass 분류 → 값 추출.
     """
-    # 전처리: 번호가 합쳐진 블록 분리
-    text_blocks = _split_multi_number_blocks(text_blocks)
+    # 전처리: 여러 정보가 합쳐진 블록 분리 (전화+이메일, 팩스+전화 등)
+    text_blocks = _split_multi_pattern_blocks(text_blocks)
 
     # 1st pass: 확실한 패턴 먼저 분류 (이메일, 휴대폰)
     # → 2nd pass에서 이미 분류된 블록을 문맥으로 참조할 수 있게 함

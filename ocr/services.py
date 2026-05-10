@@ -43,8 +43,9 @@
 #
 # ═══════════════════════════════════════════════════════════════
 
-"""공유 서비스 — 싱글톤 OCR 파이프라인 + 파싱 스킬."""
+"""공유 서비스 — lazy OCR 파이프라인 + 파싱 스킬."""
 import os
+import time
 
 # PaddlePaddle 내부 플래그 비활성화 (import 전에 설정해야 적용됨)
 os.environ["FLAGS_use_mkldnn"] = "0"
@@ -82,7 +83,19 @@ class ParsingSkill:
         return {"classified_blocks": classified, "parsed": parsed}
 
 
-# ── 싱글톤 인스턴스 ──
-# 모듈 로드 시 한 번만 생성되어 앱 전체에서 재사용됨
-pipeline = BusinessCardPipeline(lang="korean")
+# ── Lazy 싱글톤 인스턴스 ──
+# Render가 포트를 빨리 열 수 있도록 서버 시작 시점에는 PaddleOCR을 로드하지 않는다.
+_pipeline = None
 parsing_skill = ParsingSkill()
+
+
+def get_pipeline() -> BusinessCardPipeline:
+    """PaddleOCR 파이프라인을 최초 요청 때 1회만 생성하고 재사용."""
+    global _pipeline
+    if _pipeline is None:
+        start = time.perf_counter()
+        print("[OCR] engine_load_start", flush=True)
+        _pipeline = BusinessCardPipeline(lang="korean")
+        elapsed = time.perf_counter() - start
+        print(f"[OCR] engine_load_done elapsed={elapsed:.3f}s", flush=True)
+    return _pipeline
