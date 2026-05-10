@@ -1,4 +1,4 @@
-package com.mora.entity;
+package com.mora.entity.user;
 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
@@ -15,37 +15,27 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "business_cards")
-public class BusinessCard {
+@Table(name = "users")
+public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    @Column(nullable = false)
-    private UUID userId;
+    private String provider;
+
+    @Column(unique = true, nullable = false)
+    private String email;
+
+    // 비밀번호 해시 (BCrypt로 인코딩된 값)
+    private String passwordHash;
 
     private String name;
 
-    private String company;
+    // 프로필 사진 url
+    private String picture;
 
-    private String position;
-
-    private String phone;
-
-    private String email;
-
-    // OCR로 인식된 원본 텍스트 전체 (TEXT 타입)
-    @Column(columnDefinition = "TEXT")
-    private String rawOcrText;
-
-    // 명함 이미지 URL (S3 같은 외부 저장소 경로)
-    private String imageUrl;
-
-    // 임베딩 벡터
-    @Column(columnDefinition = "vector(1536)")
-    private String embedding;
-
+    // 계정 생성 일시 (INSERT 시 자동 설정, UPDATE 시 변경 불가)
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
@@ -58,8 +48,8 @@ public class BusinessCard {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        BusinessCard that = (BusinessCard) o;
-        return Objects.equals(id, that.id);
+        User user = (User) o;
+        return Objects.equals(id, user.id);
     }
 
     @Override
@@ -69,11 +59,11 @@ public class BusinessCard {
 
     @Override
     public String toString() {
-        return "BusinessCard{" +
+        return "User{" +
                 "id=" + id +
-                ", userId=" + userId +
+                ", provider='" + provider + '\'' +
+                ", email='" + email + '\'' +
                 ", name='" + name + '\'' +
-                ", company='" + company + '\'' +
                 '}';
     }
 }

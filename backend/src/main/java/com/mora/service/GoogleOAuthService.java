@@ -1,8 +1,8 @@
 package com.mora.service;
 
-import com.mora.dto.GoogleTokenResponse;
-import com.mora.dto.GoogleUserResponse;
-import com.mora.dto.OAuthUserResponse;
+import com.mora.dto.oauth.GoogleTokenResponse;
+import com.mora.dto.oauth.GoogleUserResponse;
+import com.mora.dto.oauth.OAuthUserResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -11,13 +11,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-/**
- * GoogleOAuthService — Google OAuth 연동 서비스
- *
- * provider별로 토큰 교환 URL, 사용자 정보 URL, 응답 JSON 구조가 모두 다르므로
- * 서비스 클래스를 분리해 두면 컨트롤러가 불필요하게 비대해지지 않는다.
- * 또한 Google 특화 로직이 Kakao/Naver 분기와 섞이지 않아 유지보수가 쉬워진다.
- */
 @Service
 public class GoogleOAuthService {
 

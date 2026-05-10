@@ -1,8 +1,8 @@
 package com.mora.controller;
 
-import com.mora.dto.ApiResponse;
-import com.mora.dto.PosterResponse;
-import com.mora.dto.PosterSaveRequest;
+import com.mora.dto.api.ApiResponse;
+import com.mora.dto.poster.PosterResponse;
+import com.mora.dto.poster.PosterSaveRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.PosterService;
 import jakarta.servlet.http.HttpServletRequest;

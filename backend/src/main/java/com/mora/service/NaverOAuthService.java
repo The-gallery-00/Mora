@@ -1,9 +1,9 @@
 package com.mora.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.mora.dto.NaverTokenResponse;
-import com.mora.dto.NaverUserResponse;
-import com.mora.dto.OAuthUserResponse;
+import com.mora.dto.oauth.NaverTokenResponse;
+import com.mora.dto.oauth.NaverUserResponse;
+import com.mora.dto.oauth.OAuthUserResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -12,13 +12,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-/**
- * NaverOAuthService — Naver OAuth 연동 서비스
- *
- * Naver는 state를 사실상 필수로 사용하는 흐름이 일반적이다.
- * 그래서 현재 프로젝트의 stateless 인증 구조에서도 state를 꼭 검증해
- * 콜백 위조를 줄이는 방향으로 구현한다.
- */
 @Service
 public class NaverOAuthService {
 

@@ -1,7 +1,7 @@
 package com.mora.service;
 
-import com.mora.dto.TicketResponse;
-import com.mora.dto.TicketSaveRequest;
+import com.mora.dto.ticket.TicketResponse;
+import com.mora.dto.ticket.TicketSaveRequest;
 import com.mora.entity.Ticket;
 import com.mora.repository.TicketRepository;
 import org.springframework.data.domain.Page;
@@ -16,82 +16,22 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/**
- * ═══════════════════════════════════════════════════════════════
- * TicketService — 티켓 CRUD 및 하이브리드 검색 비즈니스 로직 서비스
- * ═══════════════════════════════════════════════════════════════
- *
- * [역할]
- * 티켓의 저장, 단건 조회, 목록 조회(페이지네이션), 수정, 삭제,
- * 하이브리드 검색(pg_trgm Fuzzy + pgvector) 비즈니스 로직을 처리한다.
- * TicketController에서 호출되며, TicketRepository를 통해 DB에 접근하고,
- * EmbeddingService를 통해 텍스트 임베딩을 생성한다.
- *
- * [코드 흐름]
- * 1) 저장 (save):
- *    → rawText 배열을 공백 JOIN → OpenAI로 임베딩 생성 → Ticket 엔티티 저장
- * 2) 단건 조회 (findById):
- *    → userId + id로 소유자 확인 포함 조회
- * 3) 목록 조회 (listByUser):
- *    → 페이지네이션 포함 최신순 조회
- * 4) 수정 (update):
- *    → 소유자 확인 → 필드 업데이트 → 임베딩 재생성 → 저장
- * 5) 삭제 (delete):
- *    → 소유자 확인 → DB에서 삭제
- * 6) 하이브리드 검색 (hybridSearch):
- *    → 동적 임계값 Fuzzy 검색 + Vector 검색 → 60:40 가중 합산 → 상위 K개 반환
- *
- * [하이브리드 검색 상세]
- * ───────────────────────────────────────────
- * [Fuzzy 검색 — 동적 임계값]
- * threshold를 1.0에서 시작하여 결과가 topK개 이상 나올 때까지
- * 0.1씩 낮춰간다. 최저 임계값은 0.6이다.
- * (예: 1.0 → 0.9 → 0.8 → ... → 0.6)
- *
- * [Vector 검색]
- * 검색 쿼리를 OpenAI 임베딩으로 변환하여 pgvector 코사인 유사도 검색.
- *
- * [점수 합산]
- * 최종 점수 = Fuzzy점수 × 0.6 + Vector점수 × 0.4
- * 한쪽 검색에만 나온 결과는 없는 쪽 점수를 0으로 처리한다.
- * 최종 점수로 내림차순 정렬 후 상위 topK개를 반환한다.
- * ───────────────────────────────────────────
- *
- * [사용된 어노테이션/라이브러리]
- * ───────────────────────────────────────────
- * @Service
- *   — 서비스 계층 빈 선언.
- *
- * TicketRepository
- *   — save(), findByIdAndUserId(), findByUserIdOrderByCreatedAtDesc(),
- *     delete(), fuzzySearch(), vectorSearch() 사용.
- *
- * EmbeddingService
- *   — getEmbedding(text): 텍스트를 OpenAI API로 벡터 변환.
- *
- * Page<Ticket>
- *   — 페이지네이션 결과 (content, totalElements, totalPages 등 포함).
- *
- * PageRequest.of(page, size, Sort)
- *   — 페이지 번호, 크기, 정렬 방향을 지정한 Pageable 생성.
- * ───────────────────────────────────────────
- */
 @Service
 public class TicketService {
 
     // ─── 날짜 파싱용 포맷터 목록 ──────────────────────────────────────────────
     // 연도 있는 패턴 (우선 시도)
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
-            DateTimeFormatter.ofPattern("yyyy-MM-dd"),       // 2025-12-30
-            DateTimeFormatter.ofPattern("yyyy.MM.dd"),       // 2025.12.30
-            DateTimeFormatter.ofPattern("yyyy/MM/dd"),       // 2025/12/30
-            DateTimeFormatter.ofPattern("yyyy년 MM월 dd일")  // 2025년 12월 30일
+            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
+            DateTimeFormatter.ofPattern("yyyy.MM.dd"),
+            DateTimeFormatter.ofPattern("yyyy/MM/dd"),
+            DateTimeFormatter.ofPattern("yyyy년 MM월 dd일")
     );
 
     // 연도 없는 패턴 (연도 있는 패턴 모두 실패 시 시도)
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITHOUT_YEAR = List.of(
-            DateTimeFormatter.ofPattern("MM.dd"),            // 12.30
-            DateTimeFormatter.ofPattern("MM월 dd일")         // 12월 30일
+            DateTimeFormatter.ofPattern("MM.dd"),
+            DateTimeFormatter.ofPattern("MM월 dd일")
     );
 
     // Fuzzy 검색 동적 임계값 시작점 (1.0 = 완전 일치만 허용)

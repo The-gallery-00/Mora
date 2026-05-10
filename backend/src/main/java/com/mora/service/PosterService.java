@@ -1,7 +1,7 @@
 package com.mora.service;
 
-import com.mora.dto.PosterResponse;
-import com.mora.dto.PosterSaveRequest;
+import com.mora.dto.poster.PosterResponse;
+import com.mora.dto.poster.PosterSaveRequest;
 import com.mora.entity.Poster;
 import com.mora.repository.PosterRepository;
 import org.springframework.data.domain.Page;

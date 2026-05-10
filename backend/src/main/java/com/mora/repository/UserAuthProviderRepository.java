@@ -1,6 +1,6 @@
 package com.mora.repository;
 
-import com.mora.entity.UserAuthProvider;
+import com.mora.entity.user.UserAuthProvider;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

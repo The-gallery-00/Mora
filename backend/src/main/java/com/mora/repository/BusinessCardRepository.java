@@ -11,10 +11,6 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * ═══════════════════════════════════════════════════════════════
- * BusinessCardRepository — 명함(BusinessCard) 데이터 접근 리포지토리
- * ═══════════════════════════════════════════════════════════════
- *
  * [역할]
  * BusinessCard 엔티티에 대한 CRUD 및 벡터 유사도 검색을 제공하는
  * Spring Data JPA 리포지토리 인터페이스이다.
@@ -34,21 +30,6 @@ import java.util.UUID;
  *   pgvector의 코사인 거리 연산자(<=>)로 유사도 검색을 수행한다.
  * - (상속) save(), findById(), delete() 등: JpaRepository 기본 CRUD.
  *
- * [사용된 어노테이션/라이브러리]
- * ───────────────────────────────────────────
- * @Repository
- *   — 데이터 접근 계층 표시. JPA 프록시가 자동 생성된다.
- *
- * JpaRepository<BusinessCard, UUID>
- *   — 표준 CRUD 메서드를 자동 제공한다.
- *
- * @Query(nativeQuery = true)
- *   — JPQL 대신 네이티브 SQL을 직접 작성한다.
- *     pgvector 확장의 <=> (코사인 거리) 연산자를 사용하기 위해 필요하다.
- *
- * @Param("name")
- *   — 네이티브 쿼리의 :name 바인드 변수에 메서드 파라미터를 매핑한다.
- *
  * [pgvector 관련]
  * ───────────────────────────────────────────
  * embedding <=> CAST(:vec AS vector)
@@ -63,7 +44,7 @@ import java.util.UUID;
 @Repository
 public interface BusinessCardRepository extends JpaRepository<BusinessCard, UUID> {
 
-    /** 특정 사용자의 명함 목록을 생성일 내림차순(최신순)으로 조회한다. */
+    // 특정 사용자의 명함 목록을 생성 최신순으로 조회
     List<BusinessCard> findByUserIdOrderByCreatedAtDesc(UUID userId);
 
     /**

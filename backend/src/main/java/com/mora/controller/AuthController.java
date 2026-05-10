@@ -1,7 +1,12 @@
 package com.mora.controller;
 
-import com.mora.dto.*;
-import com.mora.entity.User;
+import com.mora.dto.api.ApiResponse;
+import com.mora.dto.auth.AuthResponse;
+import com.mora.dto.auth.LoginRequest;
+import com.mora.dto.auth.SignupRequest;
+import com.mora.dto.oauth.OAuthUserResponse;
+import com.mora.dto.user.UserResponse;
+import com.mora.entity.user.User;
 import com.mora.security.JwtUtil;
 import com.mora.service.AuthService;
 import com.mora.service.GoogleOAuthService;
