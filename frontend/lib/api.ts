@@ -1,6 +1,7 @@
 import type { BusinessCard, ApiResponse, ScanResult, DocumentType } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+const OCR_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
 
 function getAuthHeaders(): Record<string, string> {
   const token = typeof window !== 'undefined' ? localStorage.getItem('mora_token') : null
@@ -68,12 +69,13 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   }
 }
 
-/** 문서 데이터를 DB에 저장 (문서 종류 + 동적 필드) */
+/** 문서 데이터를 DB에 저장 (문서 종류 + 동적 필드) + NER 학습 데이터 축적 */
 export async function saveCard(
   documentType: DocumentType,
   fields: Record<string, string>,
   imageUrl: string = '',
   rawTexts: string[] = [],
+  rawBlocks: { text: string; confidence: number }[] = [],
 ): Promise<ApiResponse<{ id: string }>> {
   try {
     // Spring 쪽이 새 스키마를 지원할 때까지 기존 필드 매핑도 함께 전달
@@ -101,6 +103,19 @@ export async function saveCard(
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `저장 실패 (${res.status})` }
     }
+
+    // NER 학습 데이터 축적 (비동기, 실패해도 무시)
+    fetch(`${OCR_BASE}/api/ner-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        document_type: documentType,
+        image_url: imageUrl,
+        raw_blocks: rawBlocks,
+        corrected_fields: fields,
+      }),
+    }).catch(() => {})
+
     return { success: true, data: json.data }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }

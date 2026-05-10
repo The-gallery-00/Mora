@@ -52,18 +52,21 @@
 #
 # ═══════════════════════════════════════════════════════════════
 
-"""OCR router — POST /scan only."""
+"""OCR router — POST /scan, POST /ner-label."""
 import time
 import uuid
+import hashlib
 import shutil
+import json
 from pathlib import Path
+from datetime import datetime
 
 import torch
 import torch.nn as nn
 from torchvision import transforms, models
 from PIL import Image, ImageOps
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, UploadFile, Body
 from fastapi.responses import JSONResponse
 
 # services.py에서 lazy 생성되는 파이프라인과 파싱 스킬을 가져옴
@@ -96,6 +99,31 @@ CLASS_TO_TYPE = {
 }
 
 CONFIDENCE_THRESHOLD = 0.8
+
+# 티켓 감지 키워드 — OCR 텍스트에 이 키워드가 있으면 티켓으로 판별
+TICKET_KEYWORDS = [
+    # 공통
+    "탑승권", "승차권", "편명", "항공편명", "좌석번호", "좌석",
+    "탑승구", "탑승장", "호차", "열차정보", "열차번호",
+    # 열차
+    "KTX", "SRT", "ITX", "무궁화", "새마을",
+    # 항공 코드
+    "OZ", "LJ", "TW", "7C", "BX", "ZE", "RS",  # 한국 항공사 코드
+    "ICN", "GMP", "CJU", "PUS", "TAE", "KPO",   # 한국 공항 코드
+    "LAX", "NRT", "KIX", "CXR",                  # 해외 공항 코드
+    # 맥락
+    "출발일", "출발시간", "도착", "구간",
+    "예약번호", "승차권 번호", "e티켓",
+    "모바일 탑승권", "스마트티켓",
+]
+
+
+def _detect_ticket_from_ocr(text_blocks: list[dict]) -> bool:
+    """OCR 텍스트 블록에서 티켓 키워드를 감지."""
+    all_text = " ".join(b["text"] for b in text_blocks).upper()
+    match_count = sum(1 for kw in TICKET_KEYWORDS if kw.upper() in all_text)
+    # 2개 이상 키워드 매칭 시 티켓으로 판별
+    return match_count >= 2
 
 
 def log_timing(request_id: str, event: str, started_at: float, previous_at: float | None = None):
@@ -179,9 +207,40 @@ def classify_image(image_path: str) -> tuple[str, float]:
     return document_type, confidence
 
 
+# NER 학습 데이터 저장 디렉토리
+NER_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ner_dataset"
+NER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# 이미지 해시 → 파일명 매핑 (중복 방지용)
+_hash_index_path = UPLOAD_DIR / ".hash_index.json"
+
+
+def _compute_image_hash(file_path: str) -> str:
+    """이미지 파일의 MD5 해시 계산."""
+    h = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_hash_index() -> dict:
+    """해시 인덱스 로드."""
+    if _hash_index_path.exists():
+        with open(_hash_index_path, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_hash_index(index: dict):
+    """해시 인덱스 저장."""
+    with open(_hash_index_path, "w") as f:
+        json.dump(index, f, ensure_ascii=False)
+
+
 @router.post("/scan")
 async def scan(file: UploadFile = File(...)):
-    """이미지를 받아 분류 → OCR → 파싱 결과를 반환."""
+    """이미지를 받아 중복 체크 → OCR → 티켓 감지/분류 → 파싱 결과를 반환."""
     request_id = uuid.uuid4().hex[:8]
     request_started_at = time.perf_counter()
     last_at = log_timing(request_id, "request_start", request_started_at)
@@ -205,9 +264,28 @@ async def scan(file: UploadFile = File(...)):
     )
     last_at = log_timing(request_id, "image_preprocessed", request_started_at, last_at)
 
+    # 중복 이미지 체크 (해시 기록만 하고 차단은 하지 않음)
+    img_hash = _compute_image_hash(str(temp_path))
+    hash_index = _load_hash_index()
+
     try:
-        # 이미지 분류
-        document_type, confidence = classify_image(str(temp_path))
+        # Step 1: OCR 먼저 실행 (티켓 키워드 감지를 위해 분류보다 선행)
+        print(f"[OCR:{request_id}] engine_get_start", flush=True)
+        pipeline = get_pipeline()
+        last_at = log_timing(request_id, "engine_ready", request_started_at, last_at)
+
+        print(f"[OCR:{request_id}] ocr_run_start", flush=True)
+        ocr_result = pipeline.run(str(temp_path))
+        last_at = log_timing(request_id, "ocr_run_done", request_started_at, last_at)
+        text_blocks = ocr_result.get("raw_blocks", [])
+
+        # Step 2: OCR 텍스트로 티켓 감지 → 감지되면 ML 분류 스킵
+        if _detect_ticket_from_ocr(text_blocks):
+            document_type = "TICKET"
+            confidence = 1.0
+            print("[분류] 티켓 키워드 감지 → TICKET (ML 분류 스킵)", flush=True)
+        else:
+            document_type, confidence = classify_image(str(temp_path))
         last_at = log_timing(request_id, "classification_done", request_started_at, last_at)
 
         # 종류별 폴더로 이동
@@ -217,17 +295,7 @@ async def scan(file: UploadFile = File(...)):
         shutil.move(str(temp_path), str(img_path))
         last_at = log_timing(request_id, "image_moved", request_started_at, last_at)
 
-        # OCR 파이프라인 실행 → 이미지에서 텍스트 블록 추출
-        print(f"[OCR:{request_id}] engine_get_start", flush=True)
-        pipeline = get_pipeline()
-        last_at = log_timing(request_id, "engine_ready", request_started_at, last_at)
-
-        print(f"[OCR:{request_id}] ocr_run_start", flush=True)
-        ocr_result = pipeline.run(str(img_path))
-        last_at = log_timing(request_id, "ocr_run_done", request_started_at, last_at)
-        text_blocks = ocr_result.get("raw_blocks", [])
-
-        # 텍스트 블록을 명함 필드(이름, 회사, 전화 등)로 분류/파싱
+        # Step 3: 텍스트 블록을 문서 종류에 맞게 파싱
         parsed_result = parsing_skill.execute(text_blocks, document_type=document_type)
         parsed = parsed_result["parsed"]
         last_at = log_timing(request_id, "parsing_done", request_started_at, last_at)
@@ -237,6 +305,14 @@ async def scan(file: UploadFile = File(...)):
             for ext in DOCUMENT_FIELDS.get(document_type, {}).values()
         }
 
+        # 해시 인덱스에 등록 (중복 방지)
+        hash_index[img_hash] = {
+            "filename": img_name,
+            "type": document_type,
+            "path": f"{document_type}/{img_name}",
+        }
+        _save_hash_index(hash_index)
+        last_at = log_timing(request_id, "hash_index_saved", request_started_at, last_at)
         log_timing(request_id, "request_done", request_started_at, last_at)
 
         return JSONResponse(content={
@@ -256,4 +332,58 @@ async def scan(file: UploadFile = File(...)):
         # 에러 시 임시 파일 정리
         if temp_path.exists():
             temp_path.unlink()
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@router.post("/ner-label")
+async def save_ner_label(data: dict = Body(...)):
+    """
+    사용자가 수정/확인한 OCR 결과를 NER 학습 데이터로 저장.
+
+    프론트에서 "확인 & 저장" 시 이 엔드포인트도 호출하여
+    OCR 원본 블록 + 사용자 수정 정답을 축적한다.
+
+    요청 body:
+    {
+        "document_type": "BUSINESS_CARD",
+        "image_url": "/uploads/BUSINESS_CARD/xxx.jpg",
+        "raw_blocks": [{"text": "...", "confidence": 0.99, ...}, ...],
+        "corrected_fields": {"name": "이응환", "company_name": "우주관광(주)", ...}
+    }
+    """
+    try:
+        document_type = data.get("document_type", "UNKNOWN")
+        image_url = data.get("image_url", "")
+        raw_blocks = data.get("raw_blocks", [])
+        corrected_fields = data.get("corrected_fields", {})
+
+        if not raw_blocks or not corrected_fields:
+            return JSONResponse(content={"success": False, "error": "raw_blocks와 corrected_fields 필요"})
+
+        # 문서 종류별 디렉토리
+        type_dir = NER_DATA_DIR / document_type
+        type_dir.mkdir(parents=True, exist_ok=True)
+
+        # 파일명: 타임스탬프 기반
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        label_path = type_dir / f"{timestamp}.json"
+
+        label_data = {
+            "document_type": document_type,
+            "image_url": image_url,
+            "raw_blocks": [{"text": b["text"], "confidence": b.get("confidence", 0)} for b in raw_blocks],
+            "corrected_fields": corrected_fields,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        with open(label_path, "w", encoding="utf-8") as f:
+            json.dump(label_data, f, ensure_ascii=False, indent=2)
+
+        # 현재 축적된 데이터 수 카운트
+        count = len(list(type_dir.glob("*.json")))
+        print(f"[NER] {document_type} 라벨 저장 ({count}건 축적)")
+
+        return JSONResponse(content={"success": True, "data": {"count": count}})
+
+    except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})

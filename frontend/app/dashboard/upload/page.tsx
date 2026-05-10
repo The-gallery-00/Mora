@@ -187,9 +187,10 @@ export default function UploadPage() {
     setIsSaving(true)
     setError(null)
 
-    // editFields 전체를 documentType과 함께 전달
+    // editFields 전체를 documentType과 함께 전달 + NER 학습 데이터 축적
     const res = await saveCard(documentType, editFields, imageUrl,
-      ocrScanResult?.rawTexts || [])
+      ocrScanResult?.rawTexts || [],
+      ocrScanResult?.rawBlocks || [])
     setIsSaving(false)
 
     if (res.success) {
