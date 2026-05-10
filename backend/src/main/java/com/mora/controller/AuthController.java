@@ -18,61 +18,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
-/**
- * ═══════════════════════════════════════════════════════════════
- * AuthController — 인증 관련 REST API 컨트롤러
- * ═══════════════════════════════════════════════════════════════
- *
- * [역할]
- * 회원가입, 로그인, 내 정보 조회 등 인증(Authentication) 관련
- * HTTP 엔드포인트를 제공하는 컨트롤러이다.
- * 프론트엔드에서 /auth/* 경로로 요청을 보내면 이 컨트롤러가 처리한다.
- *
- * [코드 흐름]
- * 1) 회원가입 (POST /auth/signup):
- *    → SignupRequest JSON 수신 → AuthService.signup() 호출
- *    → 성공 시 AuthResponse(토큰+사용자정보) 반환, 실패 시 에러 메시지 반환
- * 2) 로그인 (POST /auth/login):
- *    → LoginRequest JSON 수신 → AuthService.login() 호출
- *    → 성공 시 AuthResponse 반환, 실패 시 에러 메시지 반환
- * 3) 내 정보 조회 (GET /auth/me):
- *    → Authorization 헤더에서 JWT 토큰 추출 → JwtUtil로 userId 파싱
- *    → AuthService.getUserById()로 사용자 조회 → UserResponse 반환
- *
- * [메서드 목록]
- * - signup(SignupRequest): 회원가입 처리. POST /auth/signup
- * - login(LoginRequest): 로그인 처리. POST /auth/login
- * - me(HttpServletRequest): 현재 로그인한 사용자 정보 조회. GET /auth/me
- *
- * [사용된 어노테이션/라이브러리]
- * ───────────────────────────────────────────
- * @RestController
- *   — @Controller + @ResponseBody의 조합.
- *     모든 메서드의 반환값이 JSON으로 직렬화되어 HTTP 응답 바디에 담긴다.
- *
- * @RequestMapping("/auth")
- *   — 이 컨트롤러의 모든 엔드포인트에 "/auth" 경로 접두사를 추가한다.
- *
- * @PostMapping("/signup"), @PostMapping("/login")
- *   — HTTP POST 요청을 처리하는 메서드를 지정한다.
- *
- * @GetMapping("/me")
- *   — HTTP GET 요청을 처리하는 메서드를 지정한다.
- *
- * @RequestBody
- *   — HTTP 요청 바디의 JSON을 자동으로 Java 객체로 역직렬화한다.
- *     Jackson 라이브러리가 JSON ↔ 객체 변환을 수행한다.
- *
- * ResponseEntity<T>
- *   — HTTP 상태 코드, 헤더, 바디를 포함한 응답을 명시적으로 구성한다.
- *     ResponseEntity.ok(): 200 OK
- *     ResponseEntity.badRequest(): 400 Bad Request
- *     ResponseEntity.status(401): 401 Unauthorized
- *
- * ApiResponse<T>
- *   — 프로젝트 공통 응답 래퍼. { success: boolean, data: T, error: String }
- * ───────────────────────────────────────────
- */
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
