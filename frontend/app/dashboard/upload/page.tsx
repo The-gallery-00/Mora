@@ -39,9 +39,9 @@
 
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { scanImage, saveCard } from '@/lib/api'
-import type { DocumentType, ScanResult } from '@/types'
+import type { DocumentType, ScanResult, RawBlock } from '@/types'
 
 // 문서 종류별 필드 스키마 (백엔드 field_schema.py FIELD_LABELS_KO와 동일)
 const DOCUMENT_FIELD_SCHEMAS: Record<DocumentType, Record<string, string>> = {
@@ -100,6 +100,10 @@ export default function UploadPage() {
 
   // === 스캔 완료 여부 (UI 전환용) ===
   const [isScanned, setIsScanned] = useState(false)
+
+  // === 디버그: 선택된 raw block bbox 오버레이 ===
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null)
+  const imageContainerRef = useRef<HTMLDivElement>(null)
 
   // 파일 선택 또는 드롭 시 호출 — 상태 초기화 + FileReader로 미리보기 생성
   const handleFile = useCallback((f: File) => {
@@ -265,8 +269,52 @@ export default function UploadPage() {
       {isScanned && !isSaved && (
         <div style={{ marginTop: 32 }}>
           {preview && (
-            <div style={{ marginBottom: 24, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)' }}>
+            <div
+              ref={imageContainerRef}
+              style={{ marginBottom: 24, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}
+            >
               <img src={preview} alt="원본 이미지" style={{ width: '100%', display: 'block' }} />
+              {/* bbox 오버레이: 선택된 블록의 영역을 이미지 위에 표시 */}
+              {selectedBlockIndex !== null && ocrScanResult?.rawBlocks && (() => {
+                const block = ocrScanResult.rawBlocks.find(b => b.block_index === selectedBlockIndex)
+                if (!block?.bbox || !imageContainerRef.current) return null
+                const img = imageContainerRef.current.querySelector('img')
+                if (!img) return null
+                const displayWidth = img.clientWidth
+                const displayHeight = img.clientHeight
+                // bbox 좌표는 OCR 전처리(리사이즈) 후 이미지 기준이므로
+                // imageSize(OCR 처리 시 실제 크기)를 기준으로 스케일 계산
+                const ocrWidth = ocrScanResult.imageSize?.width || img.naturalWidth
+                const ocrHeight = ocrScanResult.imageSize?.height || img.naturalHeight
+                const scaleX = displayWidth / ocrWidth
+                const scaleY = displayHeight / ocrHeight
+                const xs = block.bbox.map(p => p[0] * scaleX)
+                const ys = block.bbox.map(p => p[1] * scaleY)
+                const left = Math.min(...xs)
+                const top = Math.min(...ys)
+                const width = Math.max(...xs) - left
+                const height = Math.max(...ys) - top
+                return (
+                  <>
+                    <div style={{
+                      position: 'absolute', left, top, width, height,
+                      border: '2px solid #FF8A3D',
+                      background: 'rgba(255,138,61,0.15)',
+                      borderRadius: 4,
+                      pointerEvents: 'none',
+                      transition: 'all 0.2s ease',
+                    }} />
+                    <div style={{
+                      position: 'absolute', left, top: Math.max(top - 22, 0),
+                      background: '#FF8A3D', color: 'white',
+                      fontSize: 11, fontWeight: 700, padding: '2px 8px',
+                      borderRadius: 4, whiteSpace: 'nowrap',
+                    }}>
+                      {block.text} — {(block.confidence * 100).toFixed(1)}%
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           )}
 
@@ -336,19 +384,40 @@ export default function UploadPage() {
               </p>
             )}
 
-            {/* OCR 원본 텍스트 블록 */}
-            {ocrScanResult?.rawTexts && ocrScanResult.rawTexts.length > 0 && (
+            {/* OCR 원본 텍스트 블록 — 클릭 시 이미지 위에 bbox 표시 */}
+            {ocrScanResult?.rawBlocks && ocrScanResult.rawBlocks.length > 0 && (
               <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
                 <p style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.25)', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 10 }}>
-                  OCR 원본 텍스트
+                  OCR 원본 텍스트 <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)', fontWeight: 400 }}>(클릭하면 위치 표시)</span>
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {ocrScanResult.rawTexts.map((t, i) => (
-                    <span key={i} style={{
-                      padding: '6px 12px', borderRadius: 8,
-                      background: 'rgba(255,255,255,0.03)', fontSize: 12, color: 'rgba(255,255,255,0.45)', fontFamily: 'monospace',
-                    }}>{t}</span>
-                  ))}
+                  {ocrScanResult.rawBlocks.map((block) => {
+                    const isSelected = selectedBlockIndex === block.block_index
+                    return (
+                      <span
+                        key={block.block_index}
+                        onClick={() => {
+                          setSelectedBlockIndex(isSelected ? null : block.block_index)
+                          if (!isSelected) {
+                            imageContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                          }
+                        }}
+                        style={{
+                          padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                          background: isSelected ? 'rgba(255,138,61,0.15)' : 'rgba(255,255,255,0.03)',
+                          border: isSelected ? '1px solid #FF8A3D' : '1px solid transparent',
+                          fontSize: 12, fontFamily: 'monospace',
+                          color: isSelected ? '#FF8A3D' : 'rgba(255,255,255,0.45)',
+                          transition: 'all 0.15s ease',
+                        }}
+                      >
+                        {block.text}
+                        <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.6 }}>
+                          {(block.confidence * 100).toFixed(0)}%
+                        </span>
+                      </span>
+                    )
+                  })}
                 </div>
               </div>
             )}

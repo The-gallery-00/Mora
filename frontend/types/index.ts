@@ -31,6 +31,20 @@ export interface BusinessCard {
 // 문서 종류
 export type DocumentType = 'POSTER' | 'BUSINESS_CARD' | 'RECEIPT' | 'TICKET' | 'ETC'
 
+// OCR 원본 블록 (bbox + 신뢰도 포함)
+export interface RawBlock {
+  text: string
+  confidence: number
+  bbox: number[][]    // [[x1,y1],[x2,y2],[x3,y3],[x4,y4]]
+  block_index: number
+}
+
+// OCR 처리 이미지 크기 (bbox 좌표 기준)
+export interface OcrImageSize {
+  width: number
+  height: number
+}
+
 // OCR 스캔 결과 인터페이스
 export interface ScanResult {
   type: DocumentType
@@ -38,7 +52,9 @@ export interface ScanResult {
   parsed: Record<string, string>
   fields: Record<string, string>
   rawTexts: string[]
+  rawBlocks: RawBlock[]
   imageUrl: string
+  imageSize: OcrImageSize | null
 }
 
 // API 응답 타입 — 판별 유니온(discriminated union) 패턴

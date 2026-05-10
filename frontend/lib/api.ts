@@ -38,7 +38,9 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
         parsed,
         fields,
         rawTexts: raw.map((b: { text: string }) => b.text),
+        rawBlocks: raw,
         imageUrl: inner.image_url || json.data?.image_url || '',
+        imageSize: inner.image_size || json.data?.image_size || null,
       },
     }
   } catch {
