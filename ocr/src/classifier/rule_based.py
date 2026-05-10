@@ -276,8 +276,10 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
             return "company_name"
 
     # 11) 한국어 이름 확인 — 2~4글자 한글 단독 + 한국 성씨로 시작
-    if KOREAN_NAME_PATTERN.match(text_stripped):
-        if KOREAN_SURNAME_SINGLE.match(text_stripped):
+    #     공백이 포함된 경우("이 응 환")도 공백 제거 후 판별
+    name_no_space = re.sub(r"\s+", "", text_stripped)
+    if 2 <= len(name_no_space) <= 4 and re.match(r"^[가-힣]+$", name_no_space):
+        if KOREAN_SURNAME_SINGLE.match(name_no_space) or KOREAN_SURNAME_DOUBLE.match(name_no_space):
             return "person_name"
 
     # 12) 영문 이름 추정 — 2~3 단어, 모두 알파벳, 각 단어 첫 글자 대문자
@@ -296,23 +298,36 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
     return "unknown"
 
 
+def _normalize_phone(number: str) -> str:
+    """전화번호의 구분자(. 또는 공백)를 하이픈(-)으로 통일."""
+    return re.sub(r"[.\s]+(?=\d)", "-", number)
+
+
 def extract_clean_value(text: str, field: str) -> str:
     """분류된 필드에서 해당 값만 깨끗하게 추출 (키워드/노이즈 제거)."""
     if field == "email":
-        match = EMAIL_PATTERN.search(text)
+        # "E-mail.", "Email:", "e-mail " 등 접두사 키워드 제거 후 추출
+        cleaned = re.sub(r"(?i)e[-.]?mail\s*[.:)]\s*", "", text)
+        match = EMAIL_PATTERN.search(cleaned)
         return match.group() if match else text
     if field in ("mobile_phone", "office_phone", "contact_phone"):
         match = MOBILE_PATTERN.search(text) or LANDLINE_PATTERN.search(text)
-        return match.group() if match else text
+        return _normalize_phone(match.group()) if match else text
     if field == "fax_number":
         match = LANDLINE_PATTERN.search(text) or MOBILE_PATTERN.search(text)
-        return match.group() if match else text
+        return _normalize_phone(match.group()) if match else text
     if field == "total_amount":
         match = PRICE_PATTERN.search(text)
         return match.group() if match else text
     if field == "website" or field == "website_url":
         match = LINK_PATTERN.search(text)
         return match.group() if match else text
+    if field == "person_name":
+        # 공백 포함된 한국어 이름("이 응 환") → 공백 제거("이응환")
+        name_no_space = re.sub(r"\s+", "", text.strip())
+        if re.match(r"^[가-힣]{2,4}$", name_no_space):
+            return name_no_space
+        return text.strip()
     return text
 
 
