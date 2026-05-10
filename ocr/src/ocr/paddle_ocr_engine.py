@@ -77,10 +77,11 @@
 
 """PaddleOCR 래퍼: 이미지에서 텍스트 블록을 추출하여 표준 포맷으로 반환."""
 import json
+import os
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 from paddleocr import PaddleOCR
 
 # 이미지 긴 변의 최대 허용 크기 (이를 초과하면 리사이즈)
@@ -90,15 +91,21 @@ MAX_SIDE = 1280
 class PaddleOCREngine:
     def __init__(self, lang="korean"):
         # PaddleOCR 엔진 초기화 (문서 방향 감지/왜곡 보정 비활성화로 속도 향상)
-        self.ocr = PaddleOCR(
-            lang=lang,
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-        )
+        options = {
+            "lang": lang,
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+        }
+        try:
+            self.ocr = PaddleOCR(**options)
+        except TypeError:
+            options.pop("use_textline_orientation", None)
+            self.ocr = PaddleOCR(**options)
 
     def _preprocess_image(self, image_path: str) -> str:
         """이미지 긴 변이 MAX_SIDE를 초과하면 비율 유지 리사이즈."""
-        img = Image.open(image_path).convert("RGB")
+        img = ImageOps.exif_transpose(Image.open(image_path)).convert("RGB")
         max_dim = max(img.size)  # width와 height 중 큰 값
 
         # 최대 크기 이하이면 원본 그대로 사용
@@ -112,7 +119,7 @@ class PaddleOCREngine:
 
         # 리사이즈된 이미지를 임시 파일로 저장
         tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
-        img_resized.save(tmp.name, quality=95)
+        img_resized.save(tmp.name, quality=90, optimize=True)
         return tmp.name
 
     def extract(self, image_path: str) -> dict:
@@ -120,8 +127,14 @@ class PaddleOCREngine:
         # 전처리: 필요 시 이미지 리사이즈
         processed_path = self._preprocess_image(image_path)
 
-        # PaddleOCR 실행
-        results = self.ocr.predict(processed_path)
+        try:
+            # PaddleOCR 실행
+            results = self.ocr.predict(processed_path)
+            with Image.open(processed_path) as processed_img:
+                ocr_width, ocr_height = processed_img.size
+        finally:
+            if processed_path != image_path and os.path.exists(processed_path):
+                os.unlink(processed_path)
 
         text_blocks = []
         for res in results:
@@ -150,10 +163,6 @@ class PaddleOCREngine:
                     "bbox": bbox,
                     "block_index": len(text_blocks),  # 0부터 시작하는 순서 인덱스
                 })
-
-        # OCR 처리에 사용된 이미지의 실제 크기 (bbox 좌표 기준)
-        processed_img = Image.open(processed_path)
-        ocr_width, ocr_height = processed_img.size
 
         return {
             "image_file": Path(image_path).name,
