@@ -57,8 +57,7 @@ if %errorlevel% neq 0 (
     echo DB container not found, creating new one with named volume...
     docker run -d --name mora-db -e POSTGRES_DB=mora -e POSTGRES_USER=mora -e POSTGRES_PASSWORD=mora1234 -p 5433:5432 -v mora-pgdata:/var/lib/postgresql/data --restart unless-stopped pgvector/pgvector:pg16
     timeout /t 5 /nobreak >nul
-    echo [2/5] Creating tables...
-    docker exec mora-db psql -U mora -d mora -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), provider VARCHAR(20) DEFAULT 'local', email VARCHAR(255) NOT NULL, password_hash VARCHAR(255), name VARCHAR(100) NOT NULL, picture TEXT DEFAULT '', created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(email, provider)); CREATE TABLE IF NOT EXISTS business_cards (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID REFERENCES users(id) ON DELETE CASCADE, name VARCHAR(100), company VARCHAR(200), position VARCHAR(100), phone VARCHAR(50), email VARCHAR(255), raw_ocr_text TEXT, image_url TEXT DEFAULT '', embedding vector(1536), created_at TIMESTAMPTZ DEFAULT now()); CREATE INDEX IF NOT EXISTS idx_cards_user_id ON business_cards(user_id);"
+    echo [2/5] Database created. Spring Boot/Flyway will create the schema.
 ) else (
     echo DB container already running.
     timeout /t 2 /nobreak >nul
