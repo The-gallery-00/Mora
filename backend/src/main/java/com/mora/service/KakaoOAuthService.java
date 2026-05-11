@@ -1,9 +1,9 @@
 package com.mora.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.mora.dto.KakaoTokenResponse;
-import com.mora.dto.KakaoUserResponse;
-import com.mora.dto.OAuthUserResponse;
+import com.mora.dto.oauth.KakaoTokenResponse;
+import com.mora.dto.oauth.KakaoUserResponse;
+import com.mora.dto.oauth.OAuthUserResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -12,13 +12,6 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-/**
- * KakaoOAuthService — Kakao OAuth 연동 서비스
- *
- * Kakao는 사용자 정보 응답에 `kakao_account`, `properties` 같은 중첩 구조를 사용한다.
- * 그래서 provider별 분리 서비스가 있어야 JSON 구조 차이를 서비스 내부에서 흡수하고,
- * 나머지 인증 로직은 공통 DTO만 바라볼 수 있다.
- */
 @Service
 public class KakaoOAuthService {
 

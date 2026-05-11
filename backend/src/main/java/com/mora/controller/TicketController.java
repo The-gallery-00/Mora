@@ -1,8 +1,8 @@
 package com.mora.controller;
 
-import com.mora.dto.ApiResponse;
-import com.mora.dto.TicketResponse;
-import com.mora.dto.TicketSaveRequest;
+import com.mora.dto.api.ApiResponse;
+import com.mora.dto.ticket.TicketResponse;
+import com.mora.dto.ticket.TicketSaveRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.TicketService;
 import jakarta.servlet.http.HttpServletRequest;

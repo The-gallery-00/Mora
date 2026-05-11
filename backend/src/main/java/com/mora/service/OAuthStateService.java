@@ -10,14 +10,6 @@ import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
-/**
- * OAuthStateService — OAuth state 토큰 생성/검증 서비스
- *
- * OAuth 로그인은 사용자가 직접 `/auth/{provider}/login` 으로 진입한 것인지,
- * 아니면 외부에서 콜백 URL을 임의 호출한 것인지 구분해야 한다.
- * 서버 세션을 두지 않는 현재 프로젝트 구조에서는 state를 서명된 짧은 수명 토큰으로 만들면
- * 기존 JWT 방식과 잘 맞으면서도 CSRF 성격의 위조를 줄일 수 있다.
- */
 @Service
 public class OAuthStateService {
 

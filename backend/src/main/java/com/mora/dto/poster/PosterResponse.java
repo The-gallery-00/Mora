@@ -1,7 +1,9 @@
-package com.mora.dto;
+package com.mora.dto.poster;
 
 import com.mora.entity.Poster;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
@@ -11,10 +13,13 @@ import java.util.UUID;
 
 @Getter
 @Setter
+@NoArgsConstructor
+@AllArgsConstructor
 public class PosterResponse {
 
     private Integer id;
     private UUID userId;
+    // 문서 유형 (ex.docType)
     private String docType;
     private BigDecimal classificationConfidence;
     private String title;

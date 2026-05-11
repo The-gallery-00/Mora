@@ -1,8 +1,8 @@
 package com.mora.controller;
 
-import com.mora.dto.ApiResponse;
-import com.mora.dto.CardResponse;
-import com.mora.dto.CardSaveRequest;
+import com.mora.dto.api.ApiResponse;
+import com.mora.dto.card.CardResponse;
+import com.mora.dto.card.CardSaveRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.CardService;
 import com.mora.service.OcrService;
