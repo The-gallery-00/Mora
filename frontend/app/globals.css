@@ -1,24 +1,36 @@
 @import "tailwindcss";
 
-/* ── MORA 디자인 토큰 ── */
+/* ── MORA 디자인 토큰 (화이트 테마) ── */
 :root {
   --color-primary: #15293D;
-  --color-bg: #DDE2E6;
-  --color-text: #84888D;
-  --color-accent: #FF8A3D;
-  --color-white: #FFFFFF;
-  --color-dark: #0B1521;
+  --color-point: #0077B6;
+  --color-bg: #FFFFFF;
+  --color-text: #111111;
+  --color-subtitle: #505050;
+  --color-disabled: #999999;
+  --color-border: #CBD5E1;
+  --color-card-shadow: 0px 4px 4px rgba(0, 0, 0, 0.25);
+
+  /* 문서 유형 색상 */
+  --color-poster: #0077B6;
+  --color-poster-bg: #E8EDF3;
+  --color-ticket: #6746AF;
+  --color-ticket-bg: #E9E5FA;
+  --color-receipt: #4FB048;
+  --color-receipt-bg: #CFE5D0;
+  --color-deadline: #DC8540;
+  --color-deadline-bg: #F7EADF;
 
   --radius-button: 10px;
-  --radius-card: 16px;
+  --radius-card: 12px;
 }
 
 @theme inline {
   --color-primary: var(--color-primary);
   --color-background: var(--color-bg);
-  --color-foreground: var(--color-primary);
-  --color-accent: var(--color-accent);
-  --color-muted: var(--color-text);
+  --color-foreground: var(--color-text);
+  --color-accent: var(--color-point);
+  --color-muted: var(--color-subtitle);
 }
 
 /* ── 글로벌 리셋 ── */
@@ -33,9 +45,10 @@ html {
 }
 
 body {
-  background: var(--color-dark);
-  color: var(--color-white);
+  background: var(--color-bg);
+  color: var(--color-text);
   overflow-x: hidden;
+  font-family: 'Pretendard', var(--font-body), sans-serif;
 }
 
 /* ── 스크롤바 커스텀 ── */
@@ -43,10 +56,10 @@ body {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-dark);
+  background: #F1F5F9;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-text);
+  background: var(--color-border);
   border-radius: 3px;
 }
 

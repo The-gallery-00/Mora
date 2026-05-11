@@ -1,86 +1,34 @@
-"use client";
+'use client'
 
-import { useMemo, useState } from "react";
-import StorageDrawer from "@/components/dashboard/storage/StorageDrawer";
-import StorageGrid from "@/components/dashboard/storage/StorageGrid";
-import { mockReceipts } from "@/lib/storage-mock-data";
-import type { BaseItem } from "@/types/storage";
-
-const stripTypeSuffix = (value: string) =>
-  value.replace(/\s*(명함|티켓|포스터|영수증)\s*$/, "");
+import { useRouter } from 'next/navigation'
 
 export default function StorageReceiptsPage() {
-  const [items, setItems] = useState<BaseItem[]>(mockReceipts);
-  const [selectedItem, setSelectedItem] = useState<BaseItem | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-
-  const sortedItems = useMemo(
-    () =>
-      [...items].sort(
-        (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt),
-      ),
-    [items],
-  );
-
-  const handleOpenDetail = (item: BaseItem) => {
-    setSelectedItem(item);
-    setIsDrawerOpen(true);
-  };
-
-  const handleCloseDrawer = () => {
-    setIsDrawerOpen(false);
-  };
-
-  const handleDelete = (itemId: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== itemId));
-    setDeleteTargetId(null);
-
-    if (selectedItem?.id === itemId) {
-      setSelectedItem(null);
-      setIsDrawerOpen(false);
-    }
-  };
-
-  const drawerFields = selectedItem
-    ? [
-        { label: "제목", value: stripTypeSuffix(selectedItem.title) },
-        { label: "분류", value: "영수증" },
-        {
-          label: "생성일",
-          value: new Date(selectedItem.createdAt).toLocaleDateString("ko-KR"),
-        },
-      ]
-    : [];
+  const router = useRouter()
 
   return (
-    <div className="mx-auto max-w-[1120px] pb-12">
-      <div>
-        <h1 className="mb-4 text-2xl font-bold text-white">영수증</h1>
+    <div style={{ padding: '32px 40px', maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#15293D' }}>영수증</h1>
+        <button
+          onClick={() => router.push('/dashboard/upload')}
+          style={{
+            padding: '8px 20px', borderRadius: 8, border: 'none',
+            background: '#0077B6', color: '#FFF', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}
+        >
+          등록하기
+        </button>
       </div>
 
-      <section className="mt-20">
-        <div className="mb-8">
-          <StorageGrid
-            items={sortedItems}
-            emptyMessage="아직 저장된 영수증이 없습니다"
-            deleteTargetId={deleteTargetId}
-            getMeta={(item) => new Date(item.createdAt).toLocaleDateString("ko-KR")}
-            onOpenDetail={handleOpenDetail}
-            onDeleteClick={setDeleteTargetId}
-            onConfirmDelete={handleDelete}
-            onCancelDelete={() => setDeleteTargetId(null)}
-          />
-        </div>
-      </section>
-
-      <StorageDrawer
-        item={selectedItem}
-        open={isDrawerOpen}
-        onClose={handleCloseDrawer}
-        title="영수증 상세"
-        fields={drawerFields}
-      />
+      <div style={{
+        textAlign: 'center', padding: '80px 0', borderRadius: 12,
+        border: '1px solid #CBD5E1', background: '#FFFFFF',
+      }}>
+        <p style={{ fontSize: 14, color: '#999' }}>아직 저장된 영수증이 없습니다</p>
+        <p style={{ fontSize: 12, color: '#CBD5E1', marginTop: 8 }}>
+          영수증 전용 저장 API가 준비되면 연동됩니다
+        </p>
+      </div>
     </div>
-  );
+  )
 }
