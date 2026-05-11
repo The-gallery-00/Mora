@@ -1,84 +1,392 @@
-"use client";
+'use client'
 
-import { useMemo, useState } from "react";
-import StorageDrawer from "@/components/dashboard/storage/StorageDrawer";
-import StorageGrid from "@/components/dashboard/storage/StorageGrid";
-import { mockBusinessCards } from "@/lib/storage-mock-data";
-import type { BusinessCard } from "@/types/storage";
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { getMyCards, deleteCard } from '@/lib/api'
+import type { BusinessCard } from '@/types'
+
+const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
 
 export default function StorageCardsPage() {
-  const [items, setItems] = useState<BusinessCard[]>(mockBusinessCards);
-  const [selectedItem, setSelectedItem] = useState<BusinessCard | null>(null);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+  const router = useRouter()
+  const [cards, setCards] = useState<BusinessCard[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [selectedCard, setSelectedCard] = useState<BusinessCard | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
 
-  const sortedItems = useMemo(
-    () =>
-      [...items].sort(
-        (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt),
-      ),
-    [items],
-  );
-
-  const handleOpenDetail = (item: BusinessCard) => {
-    setSelectedItem(item);
-    setIsDrawerOpen(true);
-  };
-
-  const handleCloseDrawer = () => {
-    setIsDrawerOpen(false);
-  };
-
-  const handleDelete = (itemId: string) => {
-    setItems((prev) => prev.filter((item) => item.id !== itemId));
-    setDeleteTargetId(null);
-
-    if (selectedItem?.id === itemId) {
-      setSelectedItem(null);
-      setIsDrawerOpen(false);
+  useEffect(() => {
+    async function fetchCards() {
+      setIsLoading(true)
+      const res = await getMyCards()
+      if (res.success) {
+        setCards(res.data)
+      }
+      setIsLoading(false)
     }
-  };
+    fetchCards()
+  }, [])
 
-  const drawerFields = selectedItem
-    ? [
-        { label: "회사명", value: selectedItem.company },
-        { label: "이름", value: selectedItem.name },
-        { label: "직책", value: selectedItem.position },
-        { label: "전화번호", value: selectedItem.phone },
-        { label: "팩스번호", value: selectedItem.fax },
-        { label: "이메일", value: selectedItem.email },
-      ]
-    : [];
+  const sortedCards = [...cards].sort((a, b) => {
+    const da = new Date(a.createdAt || 0).getTime()
+    const db = new Date(b.createdAt || 0).getTime()
+    return sortOrder === 'newest' ? db - da : da - db
+  })
+
+  async function handleDelete(id: string) {
+    const res = await deleteCard(id)
+    if (res.success) {
+      setCards(prev => prev.filter(c => c.id !== id))
+      if (selectedCard?.id === id) setSelectedCard(null)
+    }
+    setDeleteTargetId(null)
+  }
+
+  // 날짜별 그룹핑
+  const groupedCards: Record<string, BusinessCard[]> = {}
+  for (const card of sortedCards) {
+    const dateKey = card.createdAt ? card.createdAt.split('T')[0] : '날짜 없음'
+    if (!groupedCards[dateKey]) groupedCards[dateKey] = []
+    groupedCards[dateKey].push(card)
+  }
 
   return (
-    <div className="mx-auto max-w-[1120px] pb-12">
-      <div>
-        <h1 className="mb-10 text-2xl font-bold text-white">명함</h1>
+    <div style={{ padding: '32px 40px', maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '220px 1fr',
+        gap: 24,
+        minHeight: 'calc(100vh - 128px)',
+      }}>
+        {/* ── 왼쪽 사이드바 ── */}
+        <div>
+          <div style={{
+            borderRadius: 12, border: '1px solid #CBD5E1', padding: '20px 16px',
+            background: '#FFFFFF', marginBottom: 16,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#15293D" strokeWidth="2">
+                <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#15293D' }}>내 명함</span>
+            </div>
+            <button
+              onClick={() => router.push('/dashboard/upload')}
+              style={{
+                width: '100%', padding: '10px 0', borderRadius: 8,
+                border: 'none', background: '#0077B6', color: '#FFF',
+                fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              등록하기
+            </button>
+          </div>
+
+          <div style={{
+            borderRadius: 12, border: '1px solid #CBD5E1', padding: '16px',
+            background: '#FFFFFF',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#15293D" strokeWidth="2">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+              </svg>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#15293D' }}>명함첩</span>
+            </div>
+            {['전체 명함', '회사', '거래처', '영업'].map((group, i) => (
+              <button
+                key={group}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '8px 12px', borderRadius: 6,
+                  border: 'none', cursor: 'pointer',
+                  background: i === 0 ? '#F0F9FF' : 'transparent',
+                  color: i === 0 ? '#0077B6' : '#505050',
+                  fontSize: 13, fontWeight: i === 0 ? 600 : 400,
+                  marginBottom: 2,
+                }}
+              >
+                {group}
+              </button>
+            ))}
+            <button
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                marginTop: 8, border: 'none', background: 'transparent',
+                color: '#0077B6', fontSize: 13, cursor: 'pointer',
+                padding: '4px 0',
+              }}
+            >
+              <span style={{ fontSize: 16 }}>+</span> 그룹 추가
+            </button>
+          </div>
+        </div>
+
+        {/* ── 오른쪽 명함 리스트 ── */}
+        <div style={{
+          borderRadius: 12, border: '1px solid #CBD5E1', padding: '24px 28px',
+          background: '#FFFFFF',
+        }}>
+          {/* 헤더 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 20,
+          }}>
+            <h1 style={{ fontSize: 18, fontWeight: 700, color: '#15293D' }}>
+              전체명함 ({cards.length})
+            </h1>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button style={{
+                padding: '6px 14px', borderRadius: 6,
+                border: '1px solid #CBD5E1', background: '#FFF',
+                fontSize: 13, color: '#505050', cursor: 'pointer',
+              }}>
+                명함 관리
+              </button>
+              <select
+                value={sortOrder}
+                onChange={e => setSortOrder(e.target.value as 'newest' | 'oldest')}
+                style={{
+                  padding: '6px 12px', borderRadius: 6,
+                  border: '1px solid #CBD5E1', background: '#FFF',
+                  fontSize: 13, color: '#505050', cursor: 'pointer', outline: 'none',
+                }}
+              >
+                <option value="newest">등록일 순</option>
+                <option value="oldest">오래된 순</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 로딩 */}
+          {isLoading && (
+            <div style={{ textAlign: 'center', padding: '60px 0', color: '#999', fontSize: 14 }}>
+              불러오는 중...
+            </div>
+          )}
+
+          {/* 빈 상태 */}
+          {!isLoading && cards.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '60px 0' }}>
+              <p style={{ fontSize: 14, color: '#999' }}>아직 저장된 명함이 없습니다</p>
+              <button
+                onClick={() => router.push('/dashboard/upload')}
+                style={{
+                  marginTop: 16, padding: '10px 24px', borderRadius: 8,
+                  border: 'none', background: '#0077B6', color: '#FFF',
+                  fontSize: 14, cursor: 'pointer',
+                }}
+              >
+                명함 스캔하기
+              </button>
+            </div>
+          )}
+
+          {/* 명함 리스트 (날짜별 그룹) */}
+          {!isLoading && Object.entries(groupedCards).map(([dateKey, dateCards]) => (
+            <div key={dateKey} style={{ marginBottom: 24 }}>
+              <p style={{ fontSize: 13, color: '#999', marginBottom: 12 }}>{dateKey}</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+                {dateCards.map(card => (
+                  <div
+                    key={card.id}
+                    onClick={() => setSelectedCard(selectedCard?.id === card.id ? null : card)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '80px 1fr 1fr 1fr 1fr',
+                      alignItems: 'center',
+                      gap: 16,
+                      padding: '16px 12px',
+                      borderBottom: '1px solid #F1F5F9',
+                      cursor: 'pointer',
+                      background: selectedCard?.id === card.id ? '#F0F9FF' : 'transparent',
+                      borderRadius: 8,
+                      transition: 'background 0.1s',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* 명함 이미지 또는 아이콘 */}
+                    <div style={{
+                      width: 72, height: 48, borderRadius: 6,
+                      background: '#F1F5F9', overflow: 'hidden',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      border: '1px solid #E2E8F0',
+                    }}>
+                      {card.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={card.imageUrl.startsWith('http') ? card.imageUrl : `${IMAGE_BASE}${card.imageUrl}`}
+                          alt={card.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ) : (
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="1.5">
+                          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                          <circle cx="12" cy="7" r="4" />
+                          <line x1="8" y1="18" x2="16" y2="18" />
+                          <line x1="8" y1="20" x2="14" y2="20" />
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* 이름 + 회사 */}
+                    <div>
+                      <p style={{ fontSize: 14, fontWeight: 600, color: '#15293D' }}>
+                        {card.name || '-'}
+                      </p>
+                      <p style={{ fontSize: 12, color: '#999', marginTop: 2 }}>
+                        {card.company || '-'}
+                      </p>
+                    </div>
+
+                    {/* 직책 + 부서 */}
+                    <div>
+                      <p style={{ fontSize: 13, color: '#333' }}>
+                        {card.position || '-'}
+                      </p>
+                      <p style={{ fontSize: 12, color: '#999', marginTop: 2 }}>
+                        {(card as unknown as Record<string, string>).department || '-'}
+                      </p>
+                    </div>
+
+                    {/* 전화번호 */}
+                    <div>
+                      <p style={{ fontSize: 13, color: '#333' }}>
+                        {card.phone || '-'}
+                      </p>
+                      {(card as unknown as Record<string, string>).officePhone && (
+                        <p style={{ fontSize: 12, color: '#999', marginTop: 2 }}>
+                          {(card as unknown as Record<string, string>).officePhone}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 이메일 */}
+                    <p style={{ fontSize: 13, color: '#333' }}>
+                      {card.email || '-'}
+                    </p>
+
+                    {/* 삭제 버튼 */}
+                    {deleteTargetId === card.id ? (
+                      <div
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                          display: 'flex', gap: 4,
+                        }}
+                      >
+                        <button
+                          onClick={() => handleDelete(card.id!)}
+                          style={{
+                            padding: '4px 10px', borderRadius: 4, border: 'none',
+                            background: '#DC2626', color: '#FFF', fontSize: 11, cursor: 'pointer',
+                          }}
+                        >
+                          삭제
+                        </button>
+                        <button
+                          onClick={() => setDeleteTargetId(null)}
+                          style={{
+                            padding: '4px 10px', borderRadius: 4,
+                            border: '1px solid #CBD5E1', background: '#FFF',
+                            color: '#505050', fontSize: 11, cursor: 'pointer',
+                          }}
+                        >
+                          취소
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={e => { e.stopPropagation(); setDeleteTargetId(card.id!) }}
+                        style={{
+                          position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                          width: 28, height: 28, borderRadius: 6,
+                          border: '1px solid #E2E8F0', background: '#FFF',
+                          color: '#999', fontSize: 13, cursor: 'pointer',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <section className="mt-20">
-        <div className="mb-8">
-          <StorageGrid
-            items={sortedItems}
-            emptyMessage="아직 저장된 명함이 없습니다"
-            deleteTargetId={deleteTargetId}
-            getSubtitle={(item) => item.position}
-            getMeta={(item) => [item.company, item.phone].filter(Boolean).join(" · ")}
-            onOpenDetail={handleOpenDetail}
-            onDeleteClick={setDeleteTargetId}
-            onConfirmDelete={handleDelete}
-            onCancelDelete={() => setDeleteTargetId(null)}
+      {/* 상세 서랍 */}
+      {selectedCard && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            display: 'flex', justifyContent: 'flex-end',
+          }}
+        >
+          <div
+            onClick={() => setSelectedCard(null)}
+            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }}
           />
-        </div>
-      </section>
+          <div style={{
+            position: 'relative', width: 420, height: '100%',
+            background: '#FFFFFF', borderLeft: '1px solid #CBD5E1',
+            padding: 28, overflowY: 'auto',
+            boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>명함 상세</h2>
+              <button
+                onClick={() => setSelectedCard(null)}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  border: '1px solid #CBD5E1', background: '#FFF',
+                  cursor: 'pointer', fontSize: 14, color: '#999',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                ✕
+              </button>
+            </div>
 
-      <StorageDrawer
-        item={selectedItem}
-        open={isDrawerOpen}
-        onClose={handleCloseDrawer}
-        title="명함 상세"
-        fields={drawerFields}
-      />
+            {selectedCard.imageUrl && (
+              <div style={{
+                borderRadius: 12, overflow: 'hidden', marginBottom: 20,
+                border: '1px solid #E2E8F0',
+              }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
+                  alt={selectedCard.name}
+                  style={{ width: '100%', display: 'block' }}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+              {[
+                { label: '이름', value: selectedCard.name },
+                { label: '회사명', value: selectedCard.company },
+                { label: '직책', value: selectedCard.position },
+                { label: '전화번호', value: selectedCard.phone },
+                { label: '이메일', value: selectedCard.email },
+                { label: 'OCR 원문', value: selectedCard.rawOcrText },
+              ].map(f => (
+                <div key={f.label} style={{
+                  padding: '12px 0', borderBottom: '1px solid #F1F5F9',
+                }}>
+                  <p style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{f.label}</p>
+                  <p style={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>
+                    {f.value || '-'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+  )
 }
