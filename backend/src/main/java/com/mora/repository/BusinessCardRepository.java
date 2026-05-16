@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -47,6 +48,9 @@ public interface BusinessCardRepository extends JpaRepository<BusinessCard, UUID
     // 특정 사용자의 명함 목록을 생성 최신순으로 조회
     List<BusinessCard> findByUserIdOrderByCreatedAtDesc(UUID userId);
 
+    // 소유자 확인 포함 단건 조회
+    Optional<BusinessCard> findByIdAndUserId(UUID id, UUID userId);
+
     /**
      * pgvector 코사인 유사도 기반으로 명함을 검색한다.
      * 임베딩이 있는 명함 중 주어진 벡터와 가장 유사한 topK개를 반환한다.
@@ -56,8 +60,49 @@ public interface BusinessCardRepository extends JpaRepository<BusinessCard, UUID
      * @param topK   반환할 최대 결과 수
      * @return 명함 데이터 + similarity 점수를 포함한 Map 리스트
      */
+    /**
+     * //pg_trgm 유사도 기반으로 명함을 Fuzzy 검색한다.
+     *
+     * [검색 대상 필드]
+     * - name:         이름 (similarity 사용)
+     * - company:      회사명 (similarity 사용)
+     * - position:     직함 (similarity 사용)
+     * - phone:        전화번호 (similarity 사용)
+     * - email:        이메일 (similarity 사용)
+     * - raw_ocr_text: 전체 OCR 텍스트 (word_similarity 사용 — 긴 텍스트용)
+     */
     @Query(value = """
-            SELECT *, 1 - (embedding <=> CAST(:vec AS vector)) AS similarity
+            SELECT bc.*,
+                GREATEST(
+                    COALESCE(similarity(bc.name, :query), 0),
+                    COALESCE(similarity(bc.company, :query), 0),
+                    COALESCE(similarity(bc.position, :query), 0),
+                    COALESCE(similarity(bc.phone, :query), 0),
+                    COALESCE(similarity(bc.email, :query), 0),
+                    COALESCE(word_similarity(:query, bc.raw_ocr_text), 0)
+                ) AS fuzzy_score
+            FROM business_cards bc
+            WHERE bc.user_id = :userId
+              AND (
+                  similarity(bc.name, :query) >= :threshold
+                  OR similarity(bc.company, :query) >= :threshold
+                  OR similarity(bc.position, :query) >= :threshold
+                  OR similarity(bc.phone, :query) >= :threshold
+                  OR similarity(bc.email, :query) >= :threshold
+                  OR word_similarity(:query, bc.raw_ocr_text) >= :threshold
+              )
+            ORDER BY fuzzy_score DESC
+            LIMIT :topK
+            """, nativeQuery = true)
+    List<Map<String, Object>> fuzzySearch(
+            @Param("userId") UUID userId,
+            @Param("query") String query,
+            @Param("threshold") double threshold,
+            @Param("topK") int topK
+    );
+
+    @Query(value = """
+            SELECT *, 1 - (embedding <=> CAST(:vec AS vector)) AS vector_score
             FROM business_cards
             WHERE user_id = :userId AND embedding IS NOT NULL
             ORDER BY embedding <=> CAST(:vec AS vector)
