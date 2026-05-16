@@ -1,6 +1,7 @@
 package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.card.CardResponse;
 import com.mora.dto.card.CardSaveRequest;
 import com.mora.security.JwtUtil;
@@ -68,8 +69,10 @@ public class CardController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            CardResponse response = cardService.save(userId, body);
-            return ResponseEntity.ok(ApiResponse.ok(response));
+            ServiceResult<CardResponse> result = cardService.save(userId, body);
+            ApiResponse<CardResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -103,8 +106,10 @@ public class CardController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            CardResponse response = cardService.update(userId, id, body);
-            return ResponseEntity.ok(ApiResponse.ok(response));
+            ServiceResult<CardResponse> result = cardService.update(userId, id, body);
+            ApiResponse<CardResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -134,7 +139,7 @@ public class CardController {
      * @param query 검색 키워드 (예: "삼성전자 개발자")
      * @param topK  반환할 최대 결과 수 (기본값: 5)
      */
-    @GetMapping("/search")
+    @GetMapping("/cards/search")
     public ResponseEntity<ApiResponse<List<CardResponse>>> search(
             HttpServletRequest request,
             @RequestParam("q") String query,
@@ -142,8 +147,10 @@ public class CardController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            List<CardResponse> results = cardService.search(userId, query, topK);
-            return ResponseEntity.ok(ApiResponse.ok(results));
+            ServiceResult<List<CardResponse>> result = cardService.hybridSearch(userId, query, topK);
+            ApiResponse<List<CardResponse>> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
