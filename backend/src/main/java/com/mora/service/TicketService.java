@@ -1,5 +1,6 @@
 package com.mora.service;
 
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.ticket.TicketResponse;
 import com.mora.dto.ticket.TicketSaveRequest;
 import com.mora.entity.Ticket;
@@ -9,10 +10,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
-import java.time.Instant;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
@@ -45,6 +43,8 @@ public class TicketService {
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
 
+    private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
+
     private final TicketRepository ticketRepository;
     private final EmbeddingService embeddingService;
 
@@ -62,7 +62,7 @@ public class TicketService {
      * @param request 프론트엔드에서 전송한 티켓 데이터
      * @return 저장된 티켓의 응답 DTO
      */
-    public TicketResponse save(UUID userId, TicketSaveRequest request) {
+    public ServiceResult<TicketResponse> save(UUID userId, TicketSaveRequest request) {
         // rawText 배열을 공백으로 JOIN하여 하나의 문자열로 만든다
         // 예: ["서울", "부산", "KTX", "09:00"] → "서울 부산 KTX 09:00"
         String rawTextJoined = joinRawText(request.getRawText());
@@ -78,10 +78,10 @@ public class TicketService {
         ticket.setTransportType(request.getTransportType());
         ticket.setDepartureLocation(request.getDepartureLocation());
         ticket.setDepartureDate(parseDate(request.getDepartureDate()));  // String → LocalDate 변환
-        ticket.setDepartureTime(request.getDepartureTime());
+        ticket.setDepartureTime(parseTime(request.getDepartureTime())); // String → LocalTime 변환
         ticket.setArrivalLocation(request.getArrivalLocation());
         ticket.setArrivalDate(parseDate(request.getArrivalDate()));    // String → LocalDate 변환
-        ticket.setArrivalTime(request.getArrivalTime());
+        ticket.setArrivalTime(parseTime(request.getArrivalTime()));    // String → LocalTime 변환
         ticket.setRawText(rawTextJoined);
         ticket.setParsedJson(request.getParsedJson());
         ticket.setRawJson(request.getRawJson());
@@ -89,7 +89,10 @@ public class TicketService {
 
         // DB에 저장하고 응답 DTO로 변환하여 반환
         ticket = ticketRepository.save(ticket);
-        return TicketResponse.from(ticket);
+        TicketResponse response = TicketResponse.from(ticket);
+
+        if (embedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     /**
@@ -133,7 +136,7 @@ public class TicketService {
      * @param request  수정할 데이터
      * @return 수정된 티켓 응답 DTO
      */
-    public TicketResponse update(UUID userId, Integer ticketId, TicketSaveRequest request) {
+    public ServiceResult<TicketResponse> update(UUID userId, Integer ticketId, TicketSaveRequest request) {
         // 소유자 확인 포함 티켓 조회
         Ticket ticket = ticketRepository.findByIdAndUserId(ticketId, userId)
                 .orElseThrow(() -> new RuntimeException("Ticket not found or unauthorized"));
@@ -144,23 +147,30 @@ public class TicketService {
         if (request.getTransportType() != null) ticket.setTransportType(request.getTransportType());
         if (request.getDepartureLocation() != null) ticket.setDepartureLocation(request.getDepartureLocation());
         if (request.getDepartureDate() != null) ticket.setDepartureDate(parseDate(request.getDepartureDate()));
-        if (request.getDepartureTime() != null) ticket.setDepartureTime(request.getDepartureTime());
+        if (request.getDepartureTime() != null) ticket.setDepartureTime(parseTime(request.getDepartureTime()));
         if (request.getArrivalLocation() != null) ticket.setArrivalLocation(request.getArrivalLocation());
         if (request.getArrivalDate() != null) ticket.setArrivalDate(parseDate(request.getArrivalDate()));
-        if (request.getArrivalTime() != null) ticket.setArrivalTime(request.getArrivalTime());
+        if (request.getArrivalTime() != null) ticket.setArrivalTime(parseTime(request.getArrivalTime()));
         if (request.getParsedJson() != null) ticket.setParsedJson(request.getParsedJson());
         if (request.getRawJson() != null) ticket.setRawJson(request.getRawJson());
 
         // rawText가 전달된 경우 JOIN하여 업데이트하고 임베딩 재생성
+        String newEmbedding = null;
+        boolean embeddingAttempted = false;
         if (request.getRawText() != null && !request.getRawText().isEmpty()) {
             String rawTextJoined = joinRawText(request.getRawText());
             ticket.setRawText(rawTextJoined);
             // 텍스트가 바뀌었으므로 임베딩도 재생성
-            ticket.setEmbedding(embeddingService.getEmbedding(rawTextJoined));
+            newEmbedding = embeddingService.getEmbedding(rawTextJoined);
+            ticket.setEmbedding(newEmbedding);
+            embeddingAttempted = true;
         }
 
         ticket = ticketRepository.save(ticket);
-        return TicketResponse.from(ticket);
+        TicketResponse response = TicketResponse.from(ticket);
+
+        if (embeddingAttempted && newEmbedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     /**
@@ -198,7 +208,7 @@ public class TicketService {
      * @param topK   반환할 최대 결과 수
      * @return 유사도 점수 포함 티켓 응답 DTO 리스트 (최대 topK개)
      */
-    public List<TicketResponse> hybridSearch(UUID userId, String query, int topK) {
+    public ServiceResult<List<TicketResponse>> hybridSearch(UUID userId, String query, int topK) {
 
         // ── 1단계: 동적 임계값 Fuzzy 검색 ──────────────────────────────────
         double threshold = FUZZY_THRESHOLD_START;
@@ -231,6 +241,7 @@ public class TicketService {
         // ── 2단계: Vector 검색 ───────────────────────────────────────────────
         Map<Integer, Double> vectorScoreMap = new HashMap<>();
         Map<Integer, Map<String, Object>> vectorRowMap = new HashMap<>();
+        boolean embeddingFailed = false;
 
         String queryEmbedding = embeddingService.getEmbedding(query);
         if (queryEmbedding != null) {
@@ -243,6 +254,8 @@ public class TicketService {
                 vectorScoreMap.put(id, score);
                 vectorRowMap.put(id, row);
             }
+        } else {
+            embeddingFailed = true;
         }
 
         // ── 3단계: 점수 합산 및 최종 정렬 ───────────────────────────────────
@@ -270,7 +283,10 @@ public class TicketService {
 
         // 최종 점수 내림차순 정렬 후 상위 topK개 반환
         results.sort((a, b) -> Double.compare(b.getSimilarity(), a.getSimilarity()));
-        return results.stream().limit(topK).toList();
+        List<TicketResponse> topResults = results.stream().limit(topK).toList();
+
+        if (embeddingFailed) return ServiceResult.withMessage(topResults, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(topResults);
     }
 
     /**
@@ -316,6 +332,54 @@ public class TicketService {
                 String monthStr = cleaned.replaceAll("월.*", "").trim();
                 String dayStr = cleaned.replaceAll(".*월\\s*", "").replaceAll("일", "").trim();
                 return LocalDate.of(currentYear, Integer.parseInt(monthStr), Integer.parseInt(dayStr));
+            }
+        } catch (Exception ignored) {}
+
+        // 모든 패턴 실패 시 null 반환
+        return null;
+    }
+
+    /**
+     * 다양한 형식의 시간 문자열을 LocalTime으로 변환한다.
+     *
+     * [처리 순서]
+     * 1) null 또는 빈 문자열 → null 반환
+     * 2) "H:mm" 또는 "HH:mm" 형식 (예: "9:00", "13:23")
+     * 3) 한국어 오전/오후 형식 (예: "오전 9시", "오후 2시 30분")
+     * 4) 모든 패턴 실패 → null 반환
+     *
+     * @param timeStr OCR에서 추출된 시간 문자열
+     * @return 파싱된 LocalTime, 실패 시 null
+     */
+    private LocalTime parseTime(String timeStr) {
+        if (timeStr == null || timeStr.isBlank()) return null;
+
+        String cleaned = timeStr.trim();
+
+        // "H:mm" 또는 "HH:mm" 형식 시도 (예: "9:00", "13:23")
+        try {
+            return LocalTime.parse(cleaned, DateTimeFormatter.ofPattern("H:mm"));
+        } catch (Exception ignored) {}
+
+        // "HH:mm:ss" 형식 시도 (예: "09:00:00")
+        try {
+            return LocalTime.parse(cleaned, DateTimeFormatter.ofPattern("H:mm:ss"));
+        } catch (Exception ignored) {}
+
+        // 한국어 오전/오후 형식 (예: "오전 9시", "오후 2시 30분")
+        try {
+            boolean isPm = cleaned.contains("오후");
+            boolean isAm = cleaned.contains("오전");
+            if (isPm || isAm) {
+                String digitsOnly = cleaned.replaceAll("[^0-9]", " ").trim();
+                String[] parts = digitsOnly.split("\\s+");
+                if (parts.length >= 1) {
+                    int hour = Integer.parseInt(parts[0]);
+                    int minute = parts.length >= 2 ? Integer.parseInt(parts[1]) : 0;
+                    if (isPm && hour < 12) hour += 12;
+                    if (isAm && hour == 12) hour = 0;
+                    return LocalTime.of(hour, minute);
+                }
             }
         } catch (Exception ignored) {}
 
