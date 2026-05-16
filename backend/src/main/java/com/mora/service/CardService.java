@@ -1,5 +1,6 @@
 package com.mora.service;
 
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.card.CardResponse;
 import com.mora.dto.card.CardSaveRequest;
 import com.mora.entity.BusinessCard;
@@ -13,6 +14,14 @@ import java.util.*;
 @Service
 public class CardService {
 
+    private static final double FUZZY_THRESHOLD_START = 1.0;
+    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_STEP = 0.1;
+    private static final double FUZZY_WEIGHT = 0.6;
+    private static final double VECTOR_WEIGHT = 0.4;
+
+    private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
+
     private final BusinessCardRepository cardRepository;
     private final EmbeddingService embeddingService;
 
@@ -21,17 +30,13 @@ public class CardService {
         this.embeddingService = embeddingService;
     }
 
-    public CardResponse save(UUID userId, CardSaveRequest request) {
-        // 명함의 주요 필드들을 하나의 문자열로 합쳐 임베딩 입력 텍스트를 만든다
+    public ServiceResult<CardResponse> save(UUID userId, CardSaveRequest request) {
         String textForEmbedding = buildEmbeddingText(
                 request.getName(), request.getCompany(), request.getPosition(),
                 request.getPhone(), request.getEmail(), request.getRawOcrText()
         );
-
-        // OpenAI API를 통해 임베딩 벡터를 생성한다 (실패 시 null)
         String embedding = embeddingService.getEmbedding(textForEmbedding);
 
-        // BusinessCard 엔티티 생성 및 필드 설정
         BusinessCard card = new BusinessCard();
         card.setUserId(userId);
         card.setName(request.getName());
@@ -43,58 +48,55 @@ public class CardService {
         card.setImageUrl(request.getImageUrl());
         card.setEmbedding(embedding);
 
-        // DB에 저장하고 응답 DTO로 변환하여 반환
         card = cardRepository.save(card);
-        return CardResponse.from(card);
+        CardResponse response = CardResponse.from(card);
+
+        if (embedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     public List<CardResponse> listByUser(UUID userId) {
         return cardRepository.findByUserIdOrderByCreatedAtDesc(userId)
                 .stream()
-                .map(CardResponse::from)  // 각 엔티티를 응답 DTO로 변환
+                .map(CardResponse::from)
                 .toList();
     }
 
-    public CardResponse update(UUID userId, UUID cardId, CardSaveRequest request) {
-        // 명함 조회 (없으면 예외)
+    public ServiceResult<CardResponse> update(UUID userId, UUID cardId, CardSaveRequest request) {
         BusinessCard card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
 
-        // 소유자 확인: 요청 사용자와 명함 소유자가 다르면 거부
         if (!card.getUserId().equals(userId)) {
             throw new RuntimeException("Unauthorized");
         }
 
-        // 필드 업데이트
-        card.setName(request.getName());
-        card.setCompany(request.getCompany());
-        card.setPosition(request.getPosition());
-        card.setPhone(request.getPhone());
-        card.setEmail(request.getEmail());
-        // null이 아닌 경우에만 rawOcrText와 imageUrl을 업데이트 (부분 수정 지원)
-        if (request.getRawOcrText() != null) {
-            card.setRawOcrText(request.getRawOcrText());
-        }
-        if (request.getImageUrl() != null) {
-            card.setImageUrl(request.getImageUrl());
-        }
+        // 필드 업데이트 (null이 아닌 경우에만 수정 - 부분 수정 지원)
+        if (request.getName() != null) card.setName(request.getName());
+        if (request.getCompany() != null) card.setCompany(request.getCompany());
+        if (request.getPosition() != null) card.setPosition(request.getPosition());
+        if (request.getPhone() != null) card.setPhone(request.getPhone());
+        if (request.getEmail() != null) card.setEmail(request.getEmail());
+        if (request.getRawOcrText() != null) card.setRawOcrText(request.getRawOcrText());
+        if (request.getImageUrl() != null) card.setImageUrl(request.getImageUrl());
 
-        // 수정된 필드로 임베딩을 재생성
         String textForEmbedding = buildEmbeddingText(
                 card.getName(), card.getCompany(), card.getPosition(),
                 card.getPhone(), card.getEmail(), card.getRawOcrText()
         );
-        card.setEmbedding(embeddingService.getEmbedding(textForEmbedding));
+        String newEmbedding = embeddingService.getEmbedding(textForEmbedding);
+        card.setEmbedding(newEmbedding);
 
         card = cardRepository.save(card);
-        return CardResponse.from(card);
+        CardResponse response = CardResponse.from(card);
+
+        if (newEmbedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     public void delete(UUID userId, UUID cardId) {
         BusinessCard card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
 
-        // 소유자 확인
         if (!card.getUserId().equals(userId)) {
             throw new RuntimeException("Unauthorized");
         }
@@ -103,47 +105,96 @@ public class CardService {
     }
 
     /**
-     * 벡터 유사도 기반으로 명함을 검색한다.
-     * 검색 쿼리를 임베딩으로 변환한 뒤 pgvector의 코사인 거리로 유사한 명함을 찾는다.
-     *
-     * @param userId 검색 대상 사용자 ID
-     * @param query  검색 키워드 (예: "삼성전자 개발자")
-     * @param topK   반환할 최대 결과 수
+     * 하이브리드 검색 (pg_trgm Fuzzy + pgvector Vector)을 수행한다.
+     * 임베딩 생성 실패 시 Fuzzy 결과만 반환하고 경고 메시지를 포함한다.
      */
-    public List<CardResponse> search(UUID userId, String query, int topK) {
-        // 검색 쿼리를 임베딩 벡터로 변환
-        String queryEmbedding = embeddingService.getEmbedding(query);
-        if (queryEmbedding == null) {
-            return Collections.emptyList();  // 임베딩 생성 실패 시 빈 리스트 반환
+    public ServiceResult<List<CardResponse>> hybridSearch(UUID userId, String query, int topK) {
+
+        // ── 1단계: 동적 임계값 Fuzzy 검색 ──────────────────────────────────
+        double threshold = FUZZY_THRESHOLD_START;
+        List<Map<String, Object>> fuzzyResults = Collections.emptyList();
+
+        while (fuzzyResults.size() < topK && threshold >= FUZZY_THRESHOLD_MIN) {
+            fuzzyResults = cardRepository.fuzzySearch(userId, query, threshold, topK);
+            if (fuzzyResults.size() < topK) {
+                threshold = Math.round((threshold - FUZZY_THRESHOLD_STEP) * 10.0) / 10.0;
+            } else {
+                break;
+            }
         }
 
-        // pgvector 코사인 유사도 검색 (네이티브 쿼리)
-        List<Map<String, Object>> results = cardRepository.searchByVector(userId, queryEmbedding, topK);
+        Map<UUID, Double> fuzzyScoreMap = new HashMap<>();
+        Map<UUID, Map<String, Object>> fuzzyRowMap = new HashMap<>();
+        for (Map<String, Object> row : fuzzyResults) {
+            UUID id = UUID.fromString(row.get("id").toString());
+            double score = row.get("fuzzy_score") != null
+                    ? ((Number) row.get("fuzzy_score")).doubleValue()
+                    : 0.0;
+            fuzzyScoreMap.put(id, score);
+            fuzzyRowMap.put(id, row);
+        }
 
-        // 네이티브 쿼리 결과(Map)를 CardResponse DTO로 변환
-        return results.stream().map(row -> {
-            CardResponse cardResponse = new CardResponse();
-            cardResponse.setId(UUID.fromString(row.get("id").toString()));
-            cardResponse.setName((String) row.get("name"));
-            cardResponse.setCompany((String) row.get("company"));
-            cardResponse.setPosition((String) row.get("position"));
-            cardResponse.setPhone((String) row.get("phone"));
-            cardResponse.setEmail((String) row.get("email"));
-            cardResponse.setRawOcrText((String) row.get("raw_ocr_text"));
-            cardResponse.setImageUrl((String) row.get("image_url"));
-            // created_at → LocalDateTime 변환 (Instant 또는 Timestamp 둘 다 대응)
-            Object createdAtObj = row.get("created_at");
-            if (createdAtObj instanceof Instant) {
-                cardResponse.setCreatedAt(((Instant) createdAtObj).atZone(ZoneId.systemDefault()).toLocalDateTime());
-            } else if (createdAtObj instanceof java.sql.Timestamp) {
-                cardResponse.setCreatedAt(((java.sql.Timestamp) createdAtObj).toLocalDateTime());
+        // ── 2단계: Vector 검색 ───────────────────────────────────────────────
+        Map<UUID, Double> vectorScoreMap = new HashMap<>();
+        Map<UUID, Map<String, Object>> vectorRowMap = new HashMap<>();
+        boolean embeddingFailed = false;
+
+        String queryEmbedding = embeddingService.getEmbedding(query);
+        if (queryEmbedding != null) {
+            List<Map<String, Object>> vectorResults = cardRepository.searchByVector(userId, queryEmbedding, topK);
+            for (Map<String, Object> row : vectorResults) {
+                UUID id = UUID.fromString(row.get("id").toString());
+                double score = row.get("vector_score") != null
+                        ? ((Number) row.get("vector_score")).doubleValue()
+                        : 0.0;
+                vectorScoreMap.put(id, score);
+                vectorRowMap.put(id, row);
             }
-            // 유사도 점수 설정 (0~1, 높을수록 유사)
-            cardResponse.setSimilarity(row.get("similarity") != null
-                    ? ((Number) row.get("similarity")).doubleValue()
-                    : null);
-            return cardResponse;
-        }).toList();
+        } else {
+            embeddingFailed = true;
+        }
+
+        // ── 3단계: 점수 합산 및 최종 정렬 ───────────────────────────────────
+        Set<UUID> allIds = new HashSet<>();
+        allIds.addAll(fuzzyScoreMap.keySet());
+        allIds.addAll(vectorScoreMap.keySet());
+
+        List<CardResponse> results = new ArrayList<>();
+        for (UUID id : allIds) {
+            double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
+            double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
+            double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
+            CardResponse response = mapRowToCardResponse(row);
+            response.setSimilarity(combinedScore);
+            results.add(response);
+        }
+
+        results.sort((a, b) -> Double.compare(b.getSimilarity(), a.getSimilarity()));
+        List<CardResponse> topResults = results.stream().limit(topK).toList();
+
+        if (embeddingFailed) return ServiceResult.withMessage(topResults, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(topResults);
+    }
+
+    private CardResponse mapRowToCardResponse(Map<String, Object> row) {
+        CardResponse cardResponse = new CardResponse();
+        cardResponse.setId(UUID.fromString(row.get("id").toString()));
+        cardResponse.setName((String) row.get("name"));
+        cardResponse.setCompany((String) row.get("company"));
+        cardResponse.setPosition((String) row.get("position"));
+        cardResponse.setPhone((String) row.get("phone"));
+        cardResponse.setEmail((String) row.get("email"));
+        cardResponse.setRawOcrText((String) row.get("raw_ocr_text"));
+        cardResponse.setImageUrl((String) row.get("image_url"));
+        Object createdAtObj = row.get("created_at");
+        if (createdAtObj instanceof Instant) {
+            cardResponse.setCreatedAt(((Instant) createdAtObj).atZone(ZoneId.systemDefault()).toLocalDateTime());
+        } else if (createdAtObj instanceof java.sql.Timestamp) {
+            cardResponse.setCreatedAt(((java.sql.Timestamp) createdAtObj).toLocalDateTime());
+        }
+        return cardResponse;
     }
 
     private String buildEmbeddingText(String name, String company, String position,
