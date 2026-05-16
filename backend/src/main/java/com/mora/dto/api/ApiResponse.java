@@ -17,8 +17,10 @@ public class ApiResponse<T> {
     private boolean success;
     // 성공 시 응답 데이터
     private T data;
-    // 실패 시 에러 데이터
+    // 실패 시 에러 메시지
     private String error;
+    // 부분 성공 시 경고 메시지 (예: 임베딩 실패로 Fuzzy만 반환)
+    private String message;
 
     // 응답 성공한 경우
     public static <T> ApiResponse<T> ok(T data) {
