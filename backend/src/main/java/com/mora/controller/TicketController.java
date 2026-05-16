@@ -1,6 +1,7 @@
 package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.ticket.TicketResponse;
 import com.mora.dto.ticket.TicketSaveRequest;
 import com.mora.security.JwtUtil;
@@ -52,8 +53,10 @@ public class TicketController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            TicketResponse response = ticketService.save(userId, body);
-            return ResponseEntity.ok(ApiResponse.ok(response));
+            ServiceResult<TicketResponse> result = ticketService.save(userId, body);
+            ApiResponse<TicketResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -113,8 +116,10 @@ public class TicketController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            TicketResponse response = ticketService.update(userId, id, body);
-            return ResponseEntity.ok(ApiResponse.ok(response));
+            ServiceResult<TicketResponse> result = ticketService.update(userId, id, body);
+            ApiResponse<TicketResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -157,8 +162,10 @@ public class TicketController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            List<TicketResponse> results = ticketService.hybridSearch(userId, query, topK);
-            return ResponseEntity.ok(ApiResponse.ok(results));
+            ServiceResult<List<TicketResponse>> result = ticketService.hybridSearch(userId, query, topK);
+            ApiResponse<List<TicketResponse>> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
