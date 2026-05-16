@@ -4,7 +4,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.math.BigDecimal;
-import java.time.LocalTime;
 import java.util.List;
 
 @Getter
@@ -24,13 +23,13 @@ public class TicketSaveRequest {
 
     private String departureDate;
 
-    private LocalTime departureTime;
+    private String departureTime;
 
     private String arrivalLocation;
 
     private String arrivalDate;
 
-    private LocalTime arrivalTime;
+    private String arrivalTime;
 
     private List<String> rawText;
 
