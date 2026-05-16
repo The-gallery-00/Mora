@@ -1,4 +1,4 @@
-import type { BusinessCard, ApiResponse, ScanResult, DocumentType } from '@/types'
+import type { BusinessCard, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 const OCR_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -69,31 +69,71 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   }
 }
 
-/** 문서 데이터를 DB에 저장 (문서 종류 + 동적 필드) + NER 학습 데이터 축적 */
+/** 문서 데이터를 DB에 저장 — 문서 종류에 따라 다른 엔드포인트로 분기 */
 export async function saveCard(
   documentType: DocumentType,
   fields: Record<string, string>,
   imageUrl: string = '',
   rawTexts: string[] = [],
   rawBlocks: { text: string; confidence: number }[] = [],
+  confidence: number = 0,
 ): Promise<ApiResponse<{ id: string }>> {
   try {
-    // Spring 쪽이 새 스키마를 지원할 때까지 기존 필드 매핑도 함께 전달
-    const body: Record<string, unknown> = {
-      documentType,
-      imageUrl,
-      rawOcrText: rawTexts.join('\n'),
-      // 기존 Spring 엔드포인트 호환용 (명함 필드)
-      name: fields.name || '',
-      company: fields.company_name || '',
-      position: fields.job_title || '',
-      phone: fields.mobile_phone || fields.contact_phone || '',
-      email: fields.email || fields.contact_email || '',
-      // 새 필드 전체를 fields 객체로도 전달
-      fields,
+    let url: string
+    let body: Record<string, unknown>
+
+    if (documentType === 'TICKET') {
+      url = `${API_BASE}/api/tickets/save`
+      body = {
+        docType: documentType,
+        classificationConfidence: confidence,
+        transportType: fields.transport_type || '',
+        departureLocation: fields.departure_location || '',
+        departureDate: fields.departure_date || '',
+        departureTime: fields.departure_time || '',
+        arrivalLocation: fields.arrival_location || '',
+        arrivalDate: fields.arrival_date || '',
+        arrivalTime: fields.arrival_time || '',
+        rawText: rawTexts,
+        parsedJson: JSON.stringify({ ...fields, imageUrl }),
+        rawJson: JSON.stringify(rawBlocks),
+      }
+    } else if (documentType === 'POSTER') {
+      url = `${API_BASE}/api/posters/save`
+      body = {
+        docType: documentType,
+        classificationConfidence: confidence,
+        title: fields.title || '',
+        organizerName: fields.organizer_name || '',
+        eventStartDate: fields.event_start_date || '',
+        eventEndDate: fields.event_end_date || '',
+        contactPhone: fields.contact_phone || '',
+        contactEmail: fields.contact_email || '',
+        location: fields.location || '',
+        fee: fields.fee || '',
+        websiteUrl: fields.website_url || '',
+        description: fields.description || '',
+        rawText: rawTexts,
+        parsedJson: JSON.stringify({ ...fields, imageUrl }),
+        rawJson: JSON.stringify(rawBlocks),
+      }
+    } else {
+      // BUSINESS_CARD, RECEIPT, ETC → 기존 명함 엔드포인트
+      url = `${API_BASE}/api/save`
+      body = {
+        documentType,
+        imageUrl,
+        rawOcrText: rawTexts.join('\n'),
+        name: fields.name || '',
+        company: fields.company_name || '',
+        position: fields.job_title || '',
+        phone: fields.mobile_phone || fields.contact_phone || '',
+        email: fields.email || fields.contact_email || '',
+        fields,
+      }
     }
 
-    const res = await fetch(`${API_BASE}/api/save`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(body),
@@ -169,6 +209,72 @@ export async function updateCard(cardId: string, card: BusinessCard): Promise<Ap
     return { success: true, data: json.data }
   } catch {
     return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 티켓 삭제 */
+export async function deleteTicket(ticketId: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/tickets/${ticketId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || '삭제 실패' }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 포스터 삭제 */
+export async function deletePoster(posterId: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/posters/${posterId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || '삭제 실패' }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 내 티켓 목록 조회 */
+export async function getMyTickets(page = 0, size = 20): Promise<ApiResponse<TicketResponse[]>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/tickets?page=${page}&size=${size}`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `조회 실패 (${res.status})` }
+    }
+    // Spring Page<> 응답: { content: [...], totalPages, ... }
+    const items = Array.isArray(json.data) ? json.data : (json.data?.content || [])
+    return { success: true, data: items }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 내 포스터 목록 조회 */
+export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<PosterResponse[]>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/posters?page=${page}&size=${size}`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `조회 실패 (${res.status})` }
+    }
+    // Spring Page<> 응답: { content: [...], totalPages, ... }
+    const items = Array.isArray(json.data) ? json.data : (json.data?.content || [])
+    return { success: true, data: items }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
 }
 

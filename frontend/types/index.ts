@@ -57,6 +57,45 @@ export interface ScanResult {
   imageSize: OcrImageSize | null
 }
 
+// 티켓 응답
+export interface TicketResponse {
+  id: string
+  docType: string
+  transportType: string
+  departureLocation: string
+  departureDate: string
+  departureTime: string
+  arrivalLocation: string
+  arrivalDate: string
+  arrivalTime: string
+  rawText: string
+  parsedJson: string
+  rawJson: string
+  imageUrl: string
+  createdAt: string
+}
+
+// 포스터 응답
+export interface PosterResponse {
+  id: string
+  docType: string
+  title: string
+  organizerName: string
+  eventStartDate: string
+  eventEndDate: string
+  contactPhone: string
+  contactEmail: string
+  location: string
+  fee: string
+  websiteUrl: string
+  description: string
+  rawText: string
+  parsedJson: string
+  rawJson: string
+  imageUrl: string
+  createdAt: string
+}
+
 // API 응답 타입 — 판별 유니온(discriminated union) 패턴
 export type ApiResponse<T> =
   | { success: true; data: T }
