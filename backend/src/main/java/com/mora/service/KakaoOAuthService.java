@@ -89,7 +89,7 @@ public class KakaoOAuthService {
         JsonNode properties = bsUserResponse.getProperties();
         String email = getJsonText(kakaoAccount, "email");
         if (email == null || email.isBlank()) {
-            throw new RuntimeException("Kakao account email is required. Please enable account_email consent in Kakao Developers.");
+            email = "kakao_" + bsUserResponse.getId() + "@kakao.local";
         }
 
         String name = getJsonText(getJsonNode(kakaoAccount, "profile"), "nickname");
