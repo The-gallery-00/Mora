@@ -1,6 +1,7 @@
 package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.poster.PosterResponse;
 import com.mora.dto.poster.PosterSaveRequest;
 import com.mora.security.JwtUtil;
@@ -42,7 +43,10 @@ public class PosterController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            return ResponseEntity.ok(ApiResponse.ok(posterService.save(userId, body)));
+            ServiceResult<PosterResponse> result = posterService.save(userId, body);
+            ApiResponse<PosterResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -83,7 +87,10 @@ public class PosterController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            return ResponseEntity.ok(ApiResponse.ok(posterService.update(userId, id, body)));
+            ServiceResult<PosterResponse> result = posterService.update(userId, id, body);
+            ApiResponse<PosterResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
@@ -111,7 +118,10 @@ public class PosterController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            return ResponseEntity.ok(ApiResponse.ok(posterService.hybridSearch(userId, query, topK)));
+            ServiceResult<List<PosterResponse>> result = posterService.hybridSearch(userId, query, topK);
+            ApiResponse<List<PosterResponse>> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }

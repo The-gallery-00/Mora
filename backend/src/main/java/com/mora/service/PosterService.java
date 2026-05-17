@@ -1,5 +1,6 @@
 package com.mora.service;
 
+import com.mora.dto.api.ServiceResult;
 import com.mora.dto.poster.PosterResponse;
 import com.mora.dto.poster.PosterSaveRequest;
 import com.mora.entity.Poster;
@@ -23,7 +24,8 @@ public class PosterService {
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
             DateTimeFormatter.ofPattern("yyyy-MM-dd"),
             DateTimeFormatter.ofPattern("yyyy.MM.dd"),
-            DateTimeFormatter.ofPattern("yyyy/MM/dd")
+            DateTimeFormatter.ofPattern("yyyy/MM/dd"),
+            DateTimeFormatter.ofPattern("yyyy년 MM월 dd일")
     );
 
     private static final double FUZZY_THRESHOLD_START = 1.0;
@@ -31,6 +33,8 @@ public class PosterService {
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+
+    private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
     private final PosterRepository posterRepository;
     private final EmbeddingService embeddingService;
@@ -40,7 +44,7 @@ public class PosterService {
         this.embeddingService = embeddingService;
     }
 
-    public PosterResponse save(UUID userId, PosterSaveRequest request) {
+    public ServiceResult<PosterResponse> save(UUID userId, PosterSaveRequest request) {
         String rawTextJoined = joinRawText(request.getRawText());
         String embedding = embeddingService.getEmbedding(rawTextJoined);
 
@@ -63,7 +67,10 @@ public class PosterService {
         poster.setRawJson(request.getRawJson());
         poster.setEmbedding(embedding);
 
-        return PosterResponse.from(posterRepository.save(poster));
+        PosterResponse response = PosterResponse.from(posterRepository.save(poster));
+
+        if (embedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     public PosterResponse findById(UUID userId, Integer posterId) {
@@ -78,7 +85,7 @@ public class PosterService {
                 .map(PosterResponse::from);
     }
 
-    public PosterResponse update(UUID userId, Integer posterId, PosterSaveRequest request) {
+    public ServiceResult<PosterResponse> update(UUID userId, Integer posterId, PosterSaveRequest request) {
         Poster poster = posterRepository.findByIdAndUserId(posterId, userId)
                 .orElseThrow(() -> new RuntimeException("Poster not found or unauthorized"));
 
@@ -97,13 +104,20 @@ public class PosterService {
         if (request.getParsedJson() != null) poster.setParsedJson(request.getParsedJson());
         if (request.getRawJson() != null) poster.setRawJson(request.getRawJson());
 
+        String newEmbedding = null;
+        boolean embeddingAttempted = false;
         if (request.getRawText() != null && !request.getRawText().isEmpty()) {
             String rawTextJoined = joinRawText(request.getRawText());
             poster.setRawText(rawTextJoined);
-            poster.setEmbedding(embeddingService.getEmbedding(rawTextJoined));
+            newEmbedding = embeddingService.getEmbedding(rawTextJoined);
+            poster.setEmbedding(newEmbedding);
+            embeddingAttempted = true;
         }
 
-        return PosterResponse.from(posterRepository.save(poster));
+        PosterResponse response = PosterResponse.from(posterRepository.save(poster));
+
+        if (embeddingAttempted && newEmbedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(response);
     }
 
     public void delete(UUID userId, Integer posterId) {
@@ -112,7 +126,7 @@ public class PosterService {
         posterRepository.delete(poster);
     }
 
-    public List<PosterResponse> hybridSearch(UUID userId, String query, int topK) {
+    public ServiceResult<List<PosterResponse>> hybridSearch(UUID userId, String query, int topK) {
         double threshold = FUZZY_THRESHOLD_START;
         List<Map<String, Object>> fuzzyResults = Collections.emptyList();
 
@@ -138,6 +152,7 @@ public class PosterService {
 
         Map<Integer, Double> vectorScoreMap = new HashMap<>();
         Map<Integer, Map<String, Object>> vectorRowMap = new HashMap<>();
+        boolean embeddingFailed = false;
 
         String queryEmbedding = embeddingService.getEmbedding(query);
         if (queryEmbedding != null) {
@@ -150,6 +165,8 @@ public class PosterService {
                 vectorScoreMap.put(id, score);
                 vectorRowMap.put(id, row);
             }
+        } else {
+            embeddingFailed = true;
         }
 
         Set<Integer> allIds = new HashSet<>();
@@ -169,7 +186,10 @@ public class PosterService {
         }
 
         results.sort((a, b) -> Double.compare(b.getSimilarity(), a.getSimilarity()));
-        return results.stream().limit(topK).toList();
+        List<PosterResponse> topResults = results.stream().limit(topK).toList();
+
+        if (embeddingFailed) return ServiceResult.withMessage(topResults, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(topResults);
     }
 
     private LocalDate parseDate(String dateStr) {
@@ -186,6 +206,12 @@ public class PosterService {
         if (cleaned.matches("\\d{1,2}\\.\\d{1,2}")) {
             String[] parts = cleaned.split("\\.");
             return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+        }
+        // "12월 30일" 형식
+        if (cleaned.contains("월") && cleaned.contains("일")) {
+            String monthStr = cleaned.replaceAll("월.*", "").trim();
+            String dayStr = cleaned.replaceAll(".*월\\s*", "").replaceAll("일", "").trim();
+            return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(monthStr), Integer.parseInt(dayStr));
         }
 
         return null;
