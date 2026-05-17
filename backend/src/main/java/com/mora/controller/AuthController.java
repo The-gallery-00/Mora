@@ -14,6 +14,8 @@ import com.mora.service.KakaoOAuthService;
 import com.mora.service.NaverOAuthService;
 import com.mora.service.OAuthStateService;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -26,6 +28,8 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthService authService;
     private final JwtUtil jwtUtil;
@@ -48,7 +52,7 @@ public class AuthController {
         this.kakaoOAuthService = kakaoOAuthService;
         this.naverOAuthService = naverOAuthService;
         this.oauthStateService = oauthStateService;
-        this.frontendUrl = frontendUrl;
+        this.frontendUrl = normalizeFrontendUrl(frontendUrl);
     }
 
     /**
@@ -168,7 +172,11 @@ public class AuthController {
             AuthResponse bsResponse = authService.loginWithOAuth(bsProfile);
             return buildOAuthHtmlResponse(HttpStatus.OK, buildOAuthSuccessHtml(bsResponse));
         } catch (RuntimeException e) {
+            log.warn("OAuth callback failed. provider={}, message={}", provider, e.getMessage(), e);
             return buildOAuthHtmlResponse(HttpStatus.BAD_REQUEST, buildOAuthFailureHtml(e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected OAuth callback error. provider={}", provider, e);
+            return buildOAuthHtmlResponse(HttpStatus.INTERNAL_SERVER_ERROR, buildOAuthFailureHtml("OAuth login failed. Please check backend logs."));
         }
     }
 
@@ -280,5 +288,12 @@ public class AuthController {
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;")
                 .replace("'", "&#39;");
+    }
+
+    private String normalizeFrontendUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return value.replaceAll("/+$", "");
     }
 }

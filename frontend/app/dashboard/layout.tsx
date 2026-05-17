@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const SEARCH_CATEGORIES = [
   { label: '명함', value: 'BUSINESS_CARD' },
@@ -25,12 +25,28 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [searchCategory, setSearchCategory] = useState('BUSINESS_CARD')
   const [isCategoryOpen, setIsCategoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [session, setSession] = useState({ ready: false, hasToken: false, userName: '' })
   const storageRef = useRef<HTMLDivElement>(null)
   const categoryRef = useRef<HTMLDivElement>(null)
 
-  const session = useMemo(() => {
-    if (typeof window === 'undefined') {
-      return { ready: false, hasToken: false, userName: '' }
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const tokenFromOAuth = params.get('token')
+    const userIdFromOAuth = params.get('userId')
+    const emailFromOAuth = params.get('email')
+    const nameFromOAuth = params.get('name')
+
+    if (tokenFromOAuth) {
+      localStorage.setItem('mora_token', tokenFromOAuth)
+      localStorage.setItem(
+        'mora_user',
+        JSON.stringify({
+          id: userIdFromOAuth || '',
+          email: emailFromOAuth || '',
+          name: nameFromOAuth || emailFromOAuth?.split('@')[0] || '',
+        }),
+      )
+      window.history.replaceState(null, '', window.location.pathname)
     }
 
     const token = localStorage.getItem('mora_token')
@@ -43,7 +59,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       } catch {}
     }
 
-    return { ready: true, hasToken: !!token, userName }
+    setSession({ ready: true, hasToken: !!token, userName })
   }, [])
 
   useEffect(() => {
