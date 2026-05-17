@@ -37,6 +37,7 @@ public class KakaoOAuthService {
                 .queryParam("client_id", clientId)
                 .queryParam("redirect_uri", redirectUri)
                 .queryParam("response_type", "code")
+                .queryParam("scope", "profile_nickname profile_image account_email")
                 .queryParam("state", state);
 
         return builder.build().toUriString();
@@ -87,6 +88,10 @@ public class KakaoOAuthService {
         JsonNode kakaoAccount = bsUserResponse.getKakaoAccount();
         JsonNode properties = bsUserResponse.getProperties();
         String email = getJsonText(kakaoAccount, "email");
+        if (email == null || email.isBlank()) {
+            throw new RuntimeException("Kakao account email is required. Please enable account_email consent in Kakao Developers.");
+        }
+
         String name = getJsonText(getJsonNode(kakaoAccount, "profile"), "nickname");
         if (name == null || name.isBlank()) {
             name = getJsonText(properties, "nickname");
