@@ -87,7 +87,13 @@ Spring Boot (:8080)      ← 인증, 명함 저장/수정/삭제, 벡터 검색
 
 | GitHub | 역할 |
 |--------|------|
-| [@lavermeanyou](https://github.com/lavermeanyou) | 기획 / 개발 |
+| [@The-gallery-00](https://github.com/The-gallery-00) | PM |
+| [@lavermeanyou](https://github.com/lavermeanyou) | 기획 / OCR |
+| [@ose0919](https://github.com/ose0919) | 백엔드 |
+| [@Seeun126](https://github.com/Seeun126) | 백엔드 |
+| [@powdang](https://github.com/powdang) | 디자인 |
+| [@cjftns](https://github.com/cjftns) | 프론트 |
+
 
 ---
 
