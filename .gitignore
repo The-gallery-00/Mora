@@ -52,6 +52,9 @@ build/
 # ===== 업로드 파일 (이미지 등) =====
 uploads/*
 !uploads/.gitkeep
+ner_dataset/
+docs/.obsidian/
+docs/__MACOSX/
 
 # ===== Claude Code =====
 .claude/
