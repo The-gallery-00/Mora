@@ -87,6 +87,10 @@ public class KakaoOAuthService {
         JsonNode kakaoAccount = bsUserResponse.getKakaoAccount();
         JsonNode properties = bsUserResponse.getProperties();
         String email = getJsonText(kakaoAccount, "email");
+        if (email == null || email.isBlank()) {
+            email = "kakao_" + bsUserResponse.getId() + "@kakao.local";
+        }
+
         String name = getJsonText(getJsonNode(kakaoAccount, "profile"), "nickname");
         if (name == null || name.isBlank()) {
             name = getJsonText(properties, "nickname");
