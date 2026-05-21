@@ -18,4 +18,7 @@ public class UserResponse {
     private String name;
     // 프로필 사진 URL
     private String picture;
+    // 가입 제공자 ("local" | "google" | "kakao" | "naver")
+    // 프론트가 소셜 전용 계정에서 비밀번호 변경을 차단하기 위해 사용
+    private String provider;
 }
