@@ -2,8 +2,12 @@ package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
 import com.mora.dto.auth.AuthResponse;
+
+import com.mora.dto.auth.ChangeNameRequest;
+import com.mora.dto.auth.ChangePasswordRequest;
 import com.mora.dto.auth.LoginRequest;
 import com.mora.dto.auth.SignupRequest;
+import com.mora.security.PasswordChangeRateLimiter;
 import com.mora.dto.oauth.OAuthUserResponse;
 import com.mora.dto.user.UserResponse;
 import com.mora.entity.user.User;
@@ -39,6 +43,7 @@ public class AuthController {
     private final KakaoOAuthService kakaoOAuthService;
     private final NaverOAuthService naverOAuthService;
     private final OAuthStateService oauthStateService;
+    private final PasswordChangeRateLimiter passwordChangeRateLimiter;
     private final String frontendUrl;
 
     public AuthController(AuthService authService,
@@ -47,6 +52,7 @@ public class AuthController {
                           KakaoOAuthService kakaoOAuthService,
                           NaverOAuthService naverOAuthService,
                           OAuthStateService oauthStateService,
+                          PasswordChangeRateLimiter passwordChangeRateLimiter,
                           @Value("${app.frontend-url}") String frontendUrl) {
         this.authService = authService;
         this.jwtUtil = jwtUtil;
@@ -54,6 +60,7 @@ public class AuthController {
         this.kakaoOAuthService = kakaoOAuthService;
         this.naverOAuthService = naverOAuthService;
         this.oauthStateService = oauthStateService;
+        this.passwordChangeRateLimiter = passwordChangeRateLimiter;
         this.frontendUrl = normalizeFrontendUrl(frontendUrl);
     }
 
@@ -87,18 +94,92 @@ public class AuthController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<UserResponse>> me(HttpServletRequest request) {
         try {
-            // Authorization 헤더에서 Bearer 토큰 추출
-            String header = request.getHeader("Authorization");
-            if (header == null || !header.startsWith("Bearer "))
-                return ResponseEntity.status(401).body(ApiResponse.fail("Token required"));
-
-            // JWT에서 userId 추출 → DB에서 사용자 조회
-            UUID userId = jwtUtil.getUserId(header.substring(7));
+            UUID userId = requireUserId(request);
             User user = authService.getUserById(userId);
-            UserResponse response = new UserResponse(user.getId(), user.getEmail(), user.getName(), user.getPicture());
-            return ResponseEntity.ok(ApiResponse.ok(response));
+            return ResponseEntity.ok(ApiResponse.ok(toUserResponse(user)));
+        } catch (UnauthorizedException e) {
+            return ResponseEntity.status(401).body(ApiResponse.fail(e.getMessage()));
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    /*
+     * 닉네임 변경.
+     * 인증된 사용자의 표시 이름만 변경한다. 다른 필드는 영향받지 않는다.
+     */
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<UserResponse>> updateMe(HttpServletRequest request,
+                                                              @RequestBody ChangeNameRequest body) {
+        try {
+            UUID userId = requireUserId(request);
+            User user = authService.changeName(userId, body);
+            return ResponseEntity.ok(ApiResponse.ok(toUserResponse(user)));
+        } catch (UnauthorizedException e) {
+            return ResponseEntity.status(401).body(ApiResponse.fail(e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    /*
+     * 비밀번호 변경.
+     * 보안:
+       - 토큰에서만 userId 추출 (body 무시) → IDOR 차단
+       - Bucket4j로 IP당 분당 5회 제한 → 무차별 대입 완화
+       - 실제 검증/해싱은 서비스 계층에서 처리
+     */
+    @PatchMapping("/me/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(HttpServletRequest request,
+                                                            @RequestBody ChangePasswordRequest body) {
+        String clientKey = resolveClientKey(request);
+        if (!passwordChangeRateLimiter.tryConsume(clientKey)) {
+            return ResponseEntity.status(429).body(ApiResponse.fail("Too many requests, try again later"));
+        }
+        try {
+            UUID userId = requireUserId(request);
+            authService.changePassword(userId, body);
+            return ResponseEntity.ok(ApiResponse.ok(null));
+        } catch (UnauthorizedException e) {
+            return ResponseEntity.status(401).body(ApiResponse.fail(e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    private UUID requireUserId(HttpServletRequest request) {
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            throw new UnauthorizedException("Token required");
+        }
+        try {
+            return jwtUtil.getUserId(header.substring(7));
+        } catch (RuntimeException e) {
+            throw new UnauthorizedException("Invalid token");
+        }
+    }
+
+    private UserResponse toUserResponse(User user) {
+        return new UserResponse(user.getId(), user.getEmail(), user.getName(), user.getPicture(), user.getProvider());
+    }
+
+    private String resolveClientKey(HttpServletRequest request) {
+        // 프록시 뒤일 수 있으니 X-Forwarded-For 우선, 없으면 RemoteAddr.
+        // 토큰이 있으면 토큰 prefix도 섞어 동일 IP 다중 계정 공격을 일부 분리한다.
+        String forwarded = request.getHeader("X-Forwarded-For");
+        String ip = (forwarded != null && !forwarded.isBlank())
+                ? forwarded.split(",")[0].trim()
+                : request.getRemoteAddr();
+        String auth = request.getHeader("Authorization");
+        String tokenSuffix = (auth != null && auth.startsWith("Bearer ") && auth.length() > 16)
+                ? auth.substring(auth.length() - 8)
+                : "anon";
+        return ip + ":" + tokenSuffix;
+    }
+
+    private static class UnauthorizedException extends RuntimeException {
+        UnauthorizedException(String message) {
+            super(message);
         }
     }
 

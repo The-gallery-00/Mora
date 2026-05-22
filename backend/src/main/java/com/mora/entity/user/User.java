@@ -39,9 +39,19 @@ public class User {
     @Column(updatable = false)
     private LocalDateTime createdAt;
 
+    // 마지막 수정 일시 (UPDATE 시 자동 갱신)
+    private LocalDateTime updatedAt;
+
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
     }
 
     @Override

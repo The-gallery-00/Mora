@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { changeName as apiChangeName, changePassword as apiChangePassword, getMe } from '@/lib/api'
 
 const CompactCtx = createContext(false)
 
@@ -10,6 +11,7 @@ interface StoredUser {
   email?: string
   avatar?: string       // base64 dataURL
   joinedAt?: string
+  provider?: string     // "local" | "google" | "kakao" | "naver"
 }
 
 // Read user from localStorage (set by login/signup) — fall back to demo values
@@ -100,6 +102,23 @@ export default function SettingsPage() {
   const [email] = useState<string>(() => loadStoredUser().email || 'mvp6276@gmail.com')
   const [avatar, setAvatar] = useState<string | undefined>(() => loadStoredUser().avatar)
   const [joinedAt] = useState('2025. 11. 03.')
+  // 소셜 전용 계정에서는 비밀번호 변경을 차단해야 하므로 provider를 별도로 추적한다.
+  const [provider, setProvider] = useState<string>(() => loadStoredUser().provider || 'local')
+  const isLocalAccount = provider === 'local'
+
+  // 마운트 시 /auth/me를 호출해 최신 provider/name을 동기화한다.
+  // localStorage 값이 오래됐거나 OAuth 콜백 시 provider가 빠진 경우를 보정한다.
+  useEffect(() => {
+    let cancelled = false
+    getMe().then(res => {
+      if (cancelled || !res.success) return
+      const me = res.data
+      if (me.provider) setProvider(me.provider)
+      if (me.name) setNickname(me.name)
+      saveStoredUser({ name: me.name, email: me.email, provider: me.provider })
+    })
+    return () => { cancelled = true }
+  }, [])
   // TODO: replace stats with selector on real data once /me/stats endpoint ships
   const stats = useMemo(
     () => ({ docs: 12, integrationsActive: 1, integrationsTotal: 2, lastSyncLabel: '6분 전' }),
@@ -154,12 +173,16 @@ export default function SettingsPage() {
     e.target.value = ''
   }
 
-  function handleNicknameSave(next: string) {
+  async function handleNicknameSave(next: string) {
     const trimmed = next.trim()
     if (!trimmed) return
-    setNickname(trimmed)
-    saveStoredUser({ name: trimmed })
-    // TODO: PATCH /me with { name } once endpoint exists
+    const res = await apiChangeName(trimmed)
+    if (!res.success) {
+      alert(res.error || '닉네임 변경에 실패했습니다.')
+      return
+    }
+    setNickname(res.data.name)
+    saveStoredUser({ name: res.data.name })
     setModal(null)
   }
 
@@ -232,8 +255,19 @@ export default function SettingsPage() {
             <Row
               icon={<IconLetter ch="🔒" bg="#FEE2E2" fg="#991B1B" />}
               title="비밀번호"
-              desc="마지막 변경 3개월 전"
-              right={<Chevron label="변경" onClick={() => setModal('password')} />}
+              desc={isLocalAccount ? '마지막 변경 3개월 전' : '소셜 계정은 비밀번호가 없습니다'}
+              right={
+                <Chevron
+                  label="변경"
+                  onClick={() => {
+                    if (!isLocalAccount) {
+                      alert('소셜 로그인(구글/카카오/네이버) 계정은 비밀번호를 변경할 수 없습니다.')
+                      return
+                    }
+                    setModal('password')
+                  }}
+                />
+              }
             />
           </Card>
 
@@ -783,11 +817,40 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
-  const canSubmit = current.length > 0 && next.length >= 8 && next === confirm
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const matchError = confirm.length > 0 && next !== confirm
+  const diffError = next.length > 0 && current.length > 0 && next === current
+  // 버튼은 3개 필드 모두 채워졌으면 활성화. 일치/길이/중복 검증은 submit 시점에 한 번 더.
+  const canSubmit =
+    !submitting &&
+    current.length > 0 &&
+    next.length > 0 &&
+    confirm.length > 0
 
-  function handleSubmit() {
-    if (!canSubmit) return
-    // TODO: call /auth/password endpoint with { current, next }
+  async function handleSubmit() {
+    if (submitting) return
+    setError(null)
+    if (next.length < 8) {
+      setError('새 비밀번호는 8자 이상이어야 합니다.')
+      return
+    }
+    if (next !== confirm) {
+      setError('새 비밀번호가 일치하지 않습니다.')
+      return
+    }
+    if (next === current) {
+      setError('현재 비밀번호와 다르게 설정해주세요.')
+      return
+    }
+    setSubmitting(true)
+    const res = await apiChangePassword(current, next)
+    setSubmitting(false)
+    if (!res.success) {
+      setError(res.error || '비밀번호 변경에 실패했습니다.')
+      return
+    }
+    alert('비밀번호가 변경되었습니다. 다음 로그인부터 새 비밀번호를 사용하세요.')
     onClose()
   }
 
@@ -808,18 +871,47 @@ function PasswordModal({ onClose }: { onClose: () => void }) {
       </p>
 
       <Field label="현재 비밀번호">
-        <PasswordInput value={current} onChange={setCurrent} placeholder="••••••••" autoFocus />
+        <PasswordInput
+          value={current}
+          onChange={setCurrent}
+          placeholder="••••••••"
+          autoFocus
+          name="mora-current-pw"
+          autoComplete="off"
+        />
       </Field>
-      <Field label="새로운 비밀번호" hint="대문자·소문자·숫자·특수문자 3종 이상 권장">
-        <PasswordInput value={next} onChange={setNext} placeholder="8자 이상, 영문·숫자·기호 포함" />
+      <Field
+        label="새로운 비밀번호"
+        hint={diffError ? '현재 비밀번호와 다르게 설정해주세요.' : '8자 이상'}
+      >
+        <PasswordInput
+          value={next}
+          onChange={setNext}
+          placeholder="8자 이상"
+          name="mora-new-pw"
+          autoComplete="new-password"
+        />
       </Field>
-      <Field label="새로운 비밀번호 확인">
-        <PasswordInput value={confirm} onChange={setConfirm} placeholder="한 번 더 입력" />
+      <Field
+        label="새로운 비밀번호 확인"
+        hint={matchError ? '새 비밀번호가 일치하지 않습니다.' : undefined}
+      >
+        <PasswordInput
+          value={confirm}
+          onChange={setConfirm}
+          placeholder="한 번 더 입력"
+          name="mora-confirm-pw"
+          autoComplete="new-password"
+        />
       </Field>
+
+      {error && (
+        <p style={{ fontSize: 12, color: C.danger, margin: 0 }}>{error}</p>
+      )}
 
       <ModalActions
         onCancel={onClose}
-        confirmLabel="변경"
+        confirmLabel={submitting ? '변경 중…' : '변경'}
         confirmDisabled={!canSubmit}
         confirmTone="navy"
         onConfirm={handleSubmit}
@@ -937,12 +1029,14 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function PasswordInput({
-  value, onChange, placeholder, autoFocus,
+  value, onChange, placeholder, autoFocus, name, autoComplete,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
   autoFocus?: boolean
+  name?: string
+  autoComplete?: string
 }) {
   const [show, setShow] = useState(false)
   const [focused, setFocused] = useState(false)
@@ -964,6 +1058,10 @@ function PasswordInput({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         placeholder={placeholder}
+        name={name}
+        autoComplete={autoComplete ?? 'new-password'}
+        data-lpignore="true"
+        data-1p-ignore=""
         style={{
           flex: 1, border: 'none', background: 'transparent', outline: 'none',
           fontSize: 14, color: C.navy,
