@@ -29,7 +29,7 @@ public class CardResponse {
     // 벡터 검색 시 코사인 유사도 점수 (0~1)
     private Double similarity;
 
-    /**
+    /*
      * BusinessCard 엔티티 -> CardResponse DTO로 변환.
      * similarity는 설정x (벡터 검색이 아닌 일반 조회용).
      */
