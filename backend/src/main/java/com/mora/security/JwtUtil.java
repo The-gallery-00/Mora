@@ -50,11 +50,8 @@ public class JwtUtil {
                 .getPayload();              // Payload(Claims) 추출
     }
 
-    /**
-     * 토큰에서 사용자 UUID를 추출한다.
-     * user_id 클레임을 우선 확인하고, 없으면 subject(sub)에서 가져온다.
-     */
-    public UUID getUserId(String token) {
+    // 토큰에서 사용자 UUID를 추출(user_id 클레임을 우선 확인하고, 없으면 subject에서 가져옴)
+     public UUID getUserId(String token) {
         Claims claims = parseToken(token);
         // user_id claim에서 먼저 시도, 없으면 subject
         String uid = claims.get("user_id", String.class);
@@ -62,10 +59,7 @@ public class JwtUtil {
         return UUID.fromString(uid);
     }
 
-    /**
-     * 토큰의 유효성을 검사한다.
-     * 파싱에 성공하면 true, 서명 불일치·만료 등 예외 발생 시 false를 반환한다.
-     */
+    //토큰 유효성 검사.
     public boolean isValid(String token) {
         try {
             parseToken(token);
