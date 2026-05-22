@@ -23,13 +23,6 @@ public class OcrService {
         this.restTemplate = restTemplate;
     }
 
-    /**
-     * 명함 이미지를 외부 OCR 서버에 전송하고 인식 결과를 반환한다.
-     *
-     * @param file 클라이언트가 업로드한 명함 이미지 파일
-     * @return OCR 인식 결과 (이름, 회사, 직책, 전화번호, 이메일, 원본 텍스트 등)
-     * @throws RuntimeException OCR 서비스 호출 실패 시
-     */
     @SuppressWarnings("unchecked")
     public Map<String, Object> scan(MultipartFile file) {
         try {
