@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMyCards, deleteCard } from '@/lib/api'
+import { getMyCards, deleteCard, updateCard } from '@/lib/api'
 import type { BusinessCard } from '@/types'
 
 const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -14,6 +14,47 @@ export default function StorageCardsPage() {
   const [selectedCard, setSelectedCard] = useState<BusinessCard | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [isEditing, setIsEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState<BusinessCard | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  function openDrawer(card: BusinessCard | null) {
+    setSelectedCard(card)
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  function startEdit() {
+    if (!selectedCard) return
+    setEditDraft({ ...selectedCard })
+    setIsEditing(true)
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  async function saveEdit() {
+    if (!editDraft?.id) return
+    setIsSaving(true)
+    setEditError(null)
+    const res = await updateCard(editDraft.id, editDraft)
+    setIsSaving(false)
+    if (!res.success) {
+      setEditError(res.error || '수정 실패')
+      return
+    }
+    const updated = res.data!
+    setCards(prev => prev.map(c => (c.id === updated.id ? updated : c)))
+    setSelectedCard(updated)
+    setIsEditing(false)
+    setEditDraft(null)
+  }
 
   useEffect(() => {
     async function fetchCards() {
@@ -37,7 +78,7 @@ export default function StorageCardsPage() {
     const res = await deleteCard(id)
     if (res.success) {
       setCards(prev => prev.filter(c => c.id !== id))
-      if (selectedCard?.id === id) setSelectedCard(null)
+      if (selectedCard?.id === id) openDrawer(null)
     }
     setDeleteTargetId(null)
   }
@@ -190,7 +231,7 @@ export default function StorageCardsPage() {
                 {dateCards.map(card => (
                   <div
                     key={card.id}
-                    onClick={() => setSelectedCard(selectedCard?.id === card.id ? null : card)}
+                    onClick={() => openDrawer(selectedCard?.id === card.id ? null : card)}
                     style={{
                       display: 'grid',
                       gridTemplateColumns: '80px 1fr 1fr 1fr 1fr',
@@ -319,74 +360,166 @@ export default function StorageCardsPage() {
       </div>
 
       {/* 상세 서랍 */}
-      {selectedCard && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 100,
-            display: 'flex', justifyContent: 'flex-end',
-          }}
-        >
+      {selectedCard && (() => {
+        const view = isEditing && editDraft ? editDraft : selectedCard
+        const fields: Array<{ key: keyof BusinessCard; label: string; multiline?: boolean; editable?: boolean }> = [
+          { key: 'name', label: '이름', editable: true },
+          { key: 'company', label: '회사명', editable: true },
+          { key: 'position', label: '직책', editable: true },
+          { key: 'phone', label: '전화번호', editable: true },
+          { key: 'email', label: '이메일', editable: true },
+          { key: 'rawOcrText', label: 'OCR 원문', multiline: true, editable: false },
+        ]
+        return (
           <div
-            onClick={() => setSelectedCard(null)}
-            style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }}
-          />
-          <div style={{
-            position: 'relative', width: 420, height: '100%',
-            background: '#FFFFFF', borderLeft: '1px solid #CBD5E1',
-            padding: 28, overflowY: 'auto',
-            boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>명함 상세</h2>
-              <button
-                onClick={() => setSelectedCard(null)}
-                style={{
-                  width: 32, height: 32, borderRadius: '50%',
-                  border: '1px solid #CBD5E1', background: '#FFF',
-                  cursor: 'pointer', fontSize: 14, color: '#999',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {selectedCard.imageUrl && (
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9999,
+              display: 'flex', justifyContent: 'flex-end',
+            }}
+          >
+            <div
+              onClick={() => openDrawer(null)}
+              style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }}
+            />
+            <div style={{
+              position: 'relative', width: 420, height: '100%',
+              background: '#FFFFFF', borderLeft: '1px solid #CBD5E1',
+              padding: '28px 28px 28px 28px', overflowY: 'auto',
+              boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
+              display: 'flex', flexDirection: 'column', gap: 20,
+            }}>
               <div style={{
-                borderRadius: 12, overflow: 'hidden', marginBottom: 20,
-                border: '1px solid #E2E8F0',
+                position: 'sticky', top: -28, marginTop: -28, marginLeft: -28, marginRight: -28,
+                background: '#FFFFFF', padding: '20px 28px',
+                borderBottom: '1px solid #F1F5F9', zIndex: 1,
               }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
-                  alt={selectedCard.name}
-                  style={{ width: '100%', display: 'block' }}
-                />
-              </div>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-              {[
-                { label: '이름', value: selectedCard.name },
-                { label: '회사명', value: selectedCard.company },
-                { label: '직책', value: selectedCard.position },
-                { label: '전화번호', value: selectedCard.phone },
-                { label: '이메일', value: selectedCard.email },
-                { label: 'OCR 원문', value: selectedCard.rawOcrText },
-              ].map(f => (
-                <div key={f.label} style={{
-                  padding: '12px 0', borderBottom: '1px solid #F1F5F9',
-                }}>
-                  <p style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{f.label}</p>
-                  <p style={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>
-                    {f.value || '-'}
-                  </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>
+                  {isEditing ? '명함 수정' : '명함 상세'}
+                </h2>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {!isEditing && (
+                    <button
+                      onClick={startEdit}
+                      style={{
+                        padding: '7px 14px', borderRadius: 6, border: 'none',
+                        background: '#0077B6', color: '#FFF',
+                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      }}
+                    >
+                      수정
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openDrawer(null)}
+                    title="닫기"
+                    style={{
+                      width: 32, height: 32, borderRadius: '50%',
+                      border: '1px solid #CBD5E1', background: '#FFF',
+                      cursor: 'pointer', fontSize: 14, color: '#999',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
-              ))}
+              </div>
+              </div>
+
+              {selectedCard.imageUrl && (
+                <div style={{
+                  borderRadius: 12, overflow: 'hidden',
+                  border: '1px solid #E2E8F0',
+                }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
+                    alt={selectedCard.name}
+                    style={{ width: '100%', display: 'block' }}
+                  />
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isEditing ? 14 : 0 }}>
+                {fields.map(f => {
+                  const raw = view[f.key] as string | undefined
+                  const editable = isEditing && f.editable
+                  return (
+                    <div key={f.label} style={{
+                      padding: isEditing ? 0 : '12px 0',
+                      borderBottom: isEditing ? 'none' : '1px solid #F1F5F9',
+                    }}>
+                      <p style={{ fontSize: 11, color: '#999', marginBottom: editable ? 6 : 4 }}>{f.label}</p>
+                      {editable && f.multiline ? (
+                        <textarea
+                          value={raw || ''}
+                          onChange={e => setEditDraft(d => d && { ...d, [f.key]: e.target.value } as BusinessCard)}
+                          rows={5}
+                          style={{
+                            width: '100%', padding: '10px 12px', borderRadius: 6,
+                            border: '1px solid #CBD5E1', background: '#FAFBFC',
+                            fontSize: 14, color: '#333', outline: 'none',
+                            resize: 'vertical', fontFamily: 'inherit',
+                          }}
+                        />
+                      ) : editable ? (
+                        <input
+                          value={raw || ''}
+                          onChange={e => setEditDraft(d => d && { ...d, [f.key]: e.target.value } as BusinessCard)}
+                          style={{
+                            width: '100%', padding: '10px 12px', borderRadius: 6,
+                            border: '1px solid #CBD5E1', background: '#FAFBFC',
+                            fontSize: 14, color: '#333', outline: 'none',
+                          }}
+                        />
+                      ) : (
+                        <p style={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>
+                          {raw || '-'}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {isEditing && (
+                <>
+                  {editError && (
+                    <p style={{ fontSize: 12, color: '#DC2626' }}>{editError}</p>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                    <button
+                      onClick={cancelEdit}
+                      disabled={isSaving}
+                      style={{
+                        padding: '10px 18px', borderRadius: 6,
+                        border: '1px solid #CBD5E1', background: '#FFF',
+                        color: '#333', fontSize: 13, fontWeight: 600,
+                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={saveEdit}
+                      disabled={isSaving}
+                      style={{
+                        padding: '10px 18px', borderRadius: 6, border: 'none',
+                        background: '#0077B6', color: '#FFF',
+                        fontSize: 13, fontWeight: 600,
+                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                        opacity: isSaving ? 0.6 : 1,
+                      }}
+                    >
+                      {isSaving ? '저장 중...' : '저장'}
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

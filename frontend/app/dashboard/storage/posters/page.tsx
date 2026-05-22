@@ -2,8 +2,17 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMyPosters, deletePoster } from '@/lib/api'
+import { getMyPosters, deletePoster, updatePoster } from '@/lib/api'
 import type { PosterResponse } from '@/types'
+
+type EditableKey =
+  | 'title' | 'organizerName' | 'eventStartDate' | 'eventEndDate'
+  | 'contactPhone' | 'contactEmail' | 'location' | 'fee' | 'websiteUrl' | 'description'
+
+const EDITABLE_KEYS: EditableKey[] = [
+  'title', 'organizerName', 'eventStartDate', 'eventEndDate',
+  'contactPhone', 'contactEmail', 'location', 'fee', 'websiteUrl', 'description',
+]
 
 export default function StoragePostersPage() {
   const router = useRouter()
@@ -11,6 +20,10 @@ export default function StoragePostersPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [selectedPoster, setSelectedPoster] = useState<PosterResponse | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState<PosterResponse | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetch() {
@@ -22,11 +35,52 @@ export default function StoragePostersPage() {
     fetch()
   }, [])
 
+  function openDrawer(p: PosterResponse | null) {
+    setSelectedPoster(p)
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  function startEdit() {
+    if (!selectedPoster) return
+    setEditDraft({ ...selectedPoster })
+    setIsEditing(true)
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  async function saveEdit() {
+    if (!editDraft?.id) return
+    setIsSaving(true)
+    setEditError(null)
+    const body: Record<string, unknown> = {}
+    for (const k of EDITABLE_KEYS) {
+      body[k] = editDraft[k]
+    }
+    const res = await updatePoster(editDraft.id, body)
+    setIsSaving(false)
+    if (!res.success) {
+      setEditError(res.error || '수정 실패')
+      return
+    }
+    const updated = res.data!
+    setPosters(prev => prev.map(p => (p.id === updated.id ? updated : p)))
+    setSelectedPoster(updated)
+    setIsEditing(false)
+    setEditDraft(null)
+  }
+
   async function handleDelete(id: string) {
     const res = await deletePoster(id)
     if (res.success) {
       setPosters(prev => prev.filter(p => p.id !== id))
-      if (selectedPoster?.id === id) setSelectedPoster(null)
+      if (selectedPoster?.id === id) openDrawer(null)
     }
     setDeleteTargetId(null)
   }
@@ -61,7 +115,7 @@ export default function StoragePostersPage() {
           {posters.map(p => (
             <div
               key={p.id}
-              onClick={() => setSelectedPoster(selectedPoster?.id === p.id ? null : p)}
+              onClick={() => openDrawer(selectedPoster?.id === p.id ? null : p)}
               style={{
                 display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto',
                 alignItems: 'center', gap: 16,
@@ -121,42 +175,134 @@ export default function StoragePostersPage() {
         </div>
       )}
 
-      {selectedPoster && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={() => setSelectedPoster(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} />
-          <div style={{
-            position: 'relative', width: 400, height: '100%', background: '#FFF',
-            borderLeft: '1px solid #CBD5E1', padding: 28, overflowY: 'auto',
-            boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>포스터 상세</h2>
-              <button onClick={() => setSelectedPoster(null)} style={{
-                width: 32, height: 32, borderRadius: '50%', border: '1px solid #CBD5E1',
-                background: '#FFF', cursor: 'pointer', fontSize: 14, color: '#999',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>✕</button>
-            </div>
-            {[
-              { label: '제목', value: selectedPoster.title },
-              { label: '주최자', value: selectedPoster.organizerName },
-              { label: '시작일', value: selectedPoster.eventStartDate },
-              { label: '종료일', value: selectedPoster.eventEndDate },
-              { label: '장소', value: selectedPoster.location },
-              { label: '연락처', value: selectedPoster.contactPhone },
-              { label: '이메일', value: selectedPoster.contactEmail },
-              { label: '참가비', value: selectedPoster.fee },
-              { label: '웹사이트', value: selectedPoster.websiteUrl },
-              { label: '설명', value: selectedPoster.description },
-            ].map(f => (
-              <div key={f.label} style={{ padding: '12px 0', borderBottom: '1px solid #F1F5F9' }}>
-                <p style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{f.label}</p>
-                <p style={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>{f.value || '-'}</p>
+      {selectedPoster && (() => {
+        const view = isEditing && editDraft ? editDraft : selectedPoster
+        const fields: Array<{ key: EditableKey; label: string; multiline?: boolean }> = [
+          { key: 'title', label: '제목' },
+          { key: 'organizerName', label: '주최자' },
+          { key: 'eventStartDate', label: '시작일' },
+          { key: 'eventEndDate', label: '종료일' },
+          { key: 'location', label: '장소' },
+          { key: 'contactPhone', label: '연락처' },
+          { key: 'contactEmail', label: '이메일' },
+          { key: 'fee', label: '참가비' },
+          { key: 'websiteUrl', label: '웹사이트' },
+          { key: 'description', label: '설명', multiline: true },
+        ]
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'flex-end' }}>
+            <div
+              onClick={() => openDrawer(null)}
+              style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }}
+            />
+            <div style={{
+              position: 'relative', width: 400, height: '100%', background: '#FFF',
+              borderLeft: '1px solid #CBD5E1', padding: 28, overflowY: 'auto',
+              boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
+              display: 'flex', flexDirection: 'column', gap: 20,
+            }}>
+              <div style={{
+                position: 'sticky', top: -28, marginTop: -28, marginLeft: -28, marginRight: -28,
+                background: '#FFFFFF', padding: '20px 28px',
+                borderBottom: '1px solid #F1F5F9', zIndex: 1,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>
+                    {isEditing ? '포스터 수정' : '포스터 상세'}
+                  </h2>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {!isEditing && (
+                      <button onClick={startEdit} style={{
+                        padding: '7px 14px', borderRadius: 6, border: 'none',
+                        background: '#0077B6', color: '#FFF',
+                        fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      }}>수정</button>
+                    )}
+                    <button
+                      onClick={() => openDrawer(null)}
+                      title="닫기"
+                      style={{
+                        width: 32, height: 32, borderRadius: '50%',
+                        border: '1px solid #CBD5E1', background: '#FFF',
+                        cursor: 'pointer', fontSize: 14, color: '#999',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >✕</button>
+                  </div>
+                </div>
               </div>
-            ))}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isEditing ? 14 : 0 }}>
+                {fields.map(f => {
+                  const raw = view[f.key] as string | undefined
+                  return (
+                    <div key={f.label} style={{
+                      padding: isEditing ? 0 : '12px 0',
+                      borderBottom: isEditing ? 'none' : '1px solid #F1F5F9',
+                    }}>
+                      <p style={{ fontSize: 11, color: '#999', marginBottom: isEditing ? 6 : 4 }}>{f.label}</p>
+                      {isEditing && f.multiline ? (
+                        <textarea
+                          value={raw || ''}
+                          onChange={e => setEditDraft(d => d && { ...d, [f.key]: e.target.value } as PosterResponse)}
+                          rows={5}
+                          style={{
+                            width: '100%', padding: '10px 12px', borderRadius: 6,
+                            border: '1px solid #CBD5E1', background: '#FAFBFC',
+                            fontSize: 14, color: '#333', outline: 'none',
+                            resize: 'vertical', fontFamily: 'inherit',
+                          }}
+                        />
+                      ) : isEditing ? (
+                        <input
+                          value={raw || ''}
+                          onChange={e => setEditDraft(d => d && { ...d, [f.key]: e.target.value } as PosterResponse)}
+                          style={{
+                            width: '100%', padding: '10px 12px', borderRadius: 6,
+                            border: '1px solid #CBD5E1', background: '#FAFBFC',
+                            fontSize: 14, color: '#333', outline: 'none',
+                          }}
+                        />
+                      ) : (
+                        <p style={{ fontSize: 14, color: '#333', whiteSpace: 'pre-wrap' }}>{raw || '-'}</p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {isEditing && (
+                <>
+                  {editError && <p style={{ fontSize: 12, color: '#DC2626' }}>{editError}</p>}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                    <button
+                      onClick={cancelEdit}
+                      disabled={isSaving}
+                      style={{
+                        padding: '10px 18px', borderRadius: 6,
+                        border: '1px solid #CBD5E1', background: '#FFF',
+                        color: '#333', fontSize: 13, fontWeight: 600,
+                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                      }}
+                    >취소</button>
+                    <button
+                      onClick={saveEdit}
+                      disabled={isSaving}
+                      style={{
+                        padding: '10px 18px', borderRadius: 6, border: 'none',
+                        background: '#0077B6', color: '#FFF',
+                        fontSize: 13, fontWeight: 600,
+                        cursor: isSaving ? 'not-allowed' : 'pointer',
+                        opacity: isSaving ? 0.6 : 1,
+                      }}
+                    >{isSaving ? '저장 중...' : '저장'}</button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
