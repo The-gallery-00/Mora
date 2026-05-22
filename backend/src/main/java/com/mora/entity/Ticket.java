@@ -77,9 +77,7 @@ public class Ticket {
         this.updatedAt = LocalDateTime.now();
     }
 
-    /**
-     * 엔티티가 수정될 때마다 호출되어 updatedAt을 현재 시각으로 갱신한다.
-     */
+    // 엔티티가 수정될 때마다 호출되어 updatedAt을 현재 시각으로 갱신한다.
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
