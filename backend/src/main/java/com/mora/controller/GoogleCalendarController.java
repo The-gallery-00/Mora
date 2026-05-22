@@ -1,5 +1,6 @@
 package com.mora.controller;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.mora.dto.api.ApiResponse;
 import com.mora.entity.GoogleCalendarToken;
 import com.mora.entity.user.User;
@@ -10,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 
+@Tag(name = "구글 캘린더", description = "구글 캘린더 연동 API")
 @RestController
 @RequestMapping("/api/calendar/google")
 public class GoogleCalendarController {
