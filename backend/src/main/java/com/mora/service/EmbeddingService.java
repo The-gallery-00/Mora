@@ -26,13 +26,6 @@ public class EmbeddingService {
         this.restTemplate = restTemplate;
     }
 
-    /**
-     * 텍스트를 OpenAI text-embedding-ada-002 모델로 임베딩 벡터 문자열로 변환한다.
-     * API 키가 미설정이거나 호출 실패 시 null을 반환한다.
-     *
-     * @param text 임베딩할 입력 텍스트 (명함 정보 등)
-     * @return 임베딩 벡터 문자열 (예: "[0.0023, -0.0091, ...]") 또는 null
-     */
     @SuppressWarnings("unchecked")
     public String getEmbedding(String text) {
         // API 키가 설정되지 않았으면 임베딩을 건너뛴다
