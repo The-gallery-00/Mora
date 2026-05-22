@@ -2,7 +2,7 @@ package com.mora.service;
 
 import com.mora.dto.api.ServiceResult;
 import com.mora.dto.poster.PosterResponse;
-import com.mora.dto.poster.PosterSaveRequest;
+import com.mora.dto.poster.PosterRequest;
 import com.mora.entity.Poster;
 import com.mora.repository.PosterRepository;
 import org.springframework.data.domain.Page;
@@ -44,7 +44,7 @@ public class PosterService {
         this.embeddingService = embeddingService;
     }
 
-    public ServiceResult<PosterResponse> save(UUID userId, PosterSaveRequest request) {
+    public ServiceResult<PosterResponse> save(UUID userId, PosterRequest request) {
         String rawTextJoined = joinRawText(request.getRawText());
         String embedding = embeddingService.getEmbedding(rawTextJoined);
 
@@ -85,7 +85,7 @@ public class PosterService {
                 .map(PosterResponse::from);
     }
 
-    public ServiceResult<PosterResponse> update(UUID userId, Integer posterId, PosterSaveRequest request) {
+    public ServiceResult<PosterResponse> update(UUID userId, Integer posterId, PosterRequest request) {
         Poster poster = posterRepository.findByIdAndUserId(posterId, userId)
                 .orElseThrow(() -> new RuntimeException("Poster not found or unauthorized"));
 
@@ -204,14 +204,20 @@ public class PosterService {
         }
 
         if (cleaned.matches("\\d{1,2}\\.\\d{1,2}")) {
-            String[] parts = cleaned.split("\\.");
-            return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+            try {
+                String[] parts = cleaned.split("\\.");
+                return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+            } catch (Exception ignored) {
+            }
         }
         // "12월 30일" 형식
         if (cleaned.contains("월") && cleaned.contains("일")) {
-            String monthStr = cleaned.replaceAll("월.*", "").trim();
-            String dayStr = cleaned.replaceAll(".*월\\s*", "").replaceAll("일", "").trim();
-            return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(monthStr), Integer.parseInt(dayStr));
+            try {
+                String monthStr = cleaned.replaceAll("월.*", "").trim();
+                String dayStr = cleaned.replaceAll(".*월\\s*", "").replaceAll("일", "").trim();
+                return LocalDate.of(LocalDate.now().getYear(), Integer.parseInt(monthStr), Integer.parseInt(dayStr));
+            } catch (Exception ignored) {
+            }
         }
 
         return null;

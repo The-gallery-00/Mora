@@ -2,7 +2,7 @@ package com.mora.service;
 
 import com.mora.dto.api.ServiceResult;
 import com.mora.dto.ticket.TicketResponse;
-import com.mora.dto.ticket.TicketSaveRequest;
+import com.mora.dto.ticket.TicketRequest;
 import com.mora.entity.Ticket;
 import com.mora.repository.TicketRepository;
 import org.springframework.data.domain.Page;
@@ -17,7 +17,6 @@ import java.util.*;
 @Service
 public class TicketService {
 
-    // ─── 날짜 파싱용 포맷터 목록 ──────────────────────────────────────────────
     // 연도 있는 패턴 (우선 시도)
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
             DateTimeFormatter.ofPattern("yyyy-MM-dd"),
@@ -62,7 +61,7 @@ public class TicketService {
      * @param request 프론트엔드에서 전송한 티켓 데이터
      * @return 저장된 티켓의 응답 DTO
      */
-    public ServiceResult<TicketResponse> save(UUID userId, TicketSaveRequest request) {
+    public ServiceResult<TicketResponse> save(UUID userId, TicketRequest request) {
         // rawText 배열을 공백으로 JOIN하여 하나의 문자열로 만든다
         // 예: ["서울", "부산", "KTX", "09:00"] → "서울 부산 KTX 09:00"
         String rawTextJoined = joinRawText(request.getRawText());
@@ -95,14 +94,7 @@ public class TicketService {
         return ServiceResult.ok(response);
     }
 
-    /**
-     * 특정 사용자의 특정 티켓을 단건 조회한다.
-     * 소유자가 아니거나 존재하지 않으면 RuntimeException을 던진다.
-     *
-     * @param userId   요청 사용자 ID
-     * @param ticketId 조회할 티켓 ID
-     * @return 티켓 응답 DTO
-     */
+    // 특정 사용자의 특정 티켓을 조회(소유자가 아니거나 존재하지 않으면 RuntimeException을 던짐)
     public TicketResponse findById(UUID userId, Integer ticketId) {
         // userId + id 조건으로 조회하여 소유자 확인을 동시에 처리
         Ticket ticket = ticketRepository.findByIdAndUserId(ticketId, userId)
@@ -110,14 +102,7 @@ public class TicketService {
         return TicketResponse.from(ticket);
     }
 
-    /**
-     * 특정 사용자의 티켓 목록을 최신순(생성일 내림차순)으로 페이지네이션 조회한다.
-     *
-     * @param userId 조회할 사용자 ID
-     * @param page   페이지 번호 (0부터 시작)
-     * @param size   페이지당 항목 수
-     * @return 페이지네이션이 적용된 TicketResponse 페이지
-     */
+    // 특정 사용자의 티켓 목록을 최신순(생성일 내림차순)으로 페이지네이션 조회한다.
     public Page<TicketResponse> listByUser(UUID userId, int page, int size) {
         // 생성일 내림차순 정렬 Pageable 생성
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
@@ -126,17 +111,8 @@ public class TicketService {
                 .map(TicketResponse::from);
     }
 
-    /**
-     * 티켓 정보를 수정한다.
-     * 소유자가 아닌 경우 RuntimeException을 던진다.
-     * 수정 후 임베딩 벡터도 재생성한다.
-     *
-     * @param userId   요청 사용자 ID
-     * @param ticketId 수정할 티켓 ID
-     * @param request  수정할 데이터
-     * @return 수정된 티켓 응답 DTO
-     */
-    public ServiceResult<TicketResponse> update(UUID userId, Integer ticketId, TicketSaveRequest request) {
+    // 티켓 수정
+    public ServiceResult<TicketResponse> update(UUID userId, Integer ticketId, TicketRequest request) {
         // 소유자 확인 포함 티켓 조회
         Ticket ticket = ticketRepository.findByIdAndUserId(ticketId, userId)
                 .orElseThrow(() -> new RuntimeException("Ticket not found or unauthorized"));
@@ -173,13 +149,7 @@ public class TicketService {
         return ServiceResult.ok(response);
     }
 
-    /**
-     * 티켓을 삭제한다.
-     * 소유자가 아닌 경우 RuntimeException을 던진다.
-     *
-     * @param userId   요청 사용자 ID
-     * @param ticketId 삭제할 티켓 ID
-     */
+    // 티켓 삭제
     public void delete(UUID userId, Integer ticketId) {
         // 소유자 확인 포함 티켓 조회
         Ticket ticket = ticketRepository.findByIdAndUserId(ticketId, userId)
@@ -187,30 +157,10 @@ public class TicketService {
         ticketRepository.delete(ticket);
     }
 
-    /**
-     * 하이브리드 검색 (pg_trgm Fuzzy + pgvector Vector)을 수행한다.
-     *
-     * [검색 과정]
-     * 1) 동적 임계값 Fuzzy 검색:
-     *    threshold를 1.0부터 시작하여 결과가 topK개 이상 나올 때까지 0.1씩 낮춘다.
-     *    최저 임계값은 0.6이다.
-     *
-     * 2) Vector 검색:
-     *    검색 쿼리를 OpenAI 임베딩으로 변환하여 pgvector 코사인 유사도 검색.
-     *    임베딩 생성 실패 시 Vector 점수는 0으로 처리한다.
-     *
-     * 3) 점수 합산 및 정렬:
-     *    최종 점수 = Fuzzy점수 × 0.6 + Vector점수 × 0.4
-     *    최종 점수로 내림차순 정렬 후 상위 topK개 반환.
-     *
-     * @param userId 검색 대상 사용자 ID
-     * @param query  검색 키워드 (예: "인천 부산 KTX")
-     * @param topK   반환할 최대 결과 수
-     * @return 유사도 점수 포함 티켓 응답 DTO 리스트 (최대 topK개)
-     */
+    // 하이브리드 검색
     public ServiceResult<List<TicketResponse>> hybridSearch(UUID userId, String query, int topK) {
 
-        // ── 1단계: 동적 임계값 Fuzzy 검색 ──────────────────────────────────
+        // 1) 동적 임계값 Fuzzy 검색
         double threshold = FUZZY_THRESHOLD_START;
         List<Map<String, Object>> fuzzyResults = Collections.emptyList();
 
@@ -238,7 +188,7 @@ public class TicketService {
             fuzzyRowMap.put(id, row);
         }
 
-        // ── 2단계: Vector 검색 ───────────────────────────────────────────────
+        // 2) Vector 검색
         Map<Integer, Double> vectorScoreMap = new HashMap<>();
         Map<Integer, Map<String, Object>> vectorRowMap = new HashMap<>();
         boolean embeddingFailed = false;
@@ -258,7 +208,7 @@ public class TicketService {
             embeddingFailed = true;
         }
 
-        // ── 3단계: 점수 합산 및 최종 정렬 ───────────────────────────────────
+        // 3) 점수 합산 및 최종 정렬
         // 두 검색 결과에 등장한 모든 티켓 ID를 수집
         Set<Integer> allIds = new HashSet<>();
         allIds.addAll(fuzzyScoreMap.keySet());
@@ -289,23 +239,7 @@ public class TicketService {
         return ServiceResult.ok(topResults);
     }
 
-    /**
-     * 다양한 형식의 날짜 문자열을 LocalDate로 변환한다.
-     *
-     * [처리 순서]
-     * 1) null 또는 빈 문자열 → null 반환
-     * 2) 요일 제거 → "(월)", "(화)" 등 괄호 부분 제거
-     *    예: "2025-12-30(월)" → "2025-12-30" -> 요일 추가는 추후에 보완.
-     * 3) 연도 있는 패턴 순서대로 시도
-     *    예: "2025-12-30", "2025.12.30", "2025/12/30", "2025년 12월 30일"
-     * 4) 연도 없는 패턴 시도 → 현재 연도로 보완
-     *    예: "12.30" → LocalDate(현재연도, 12, 30)
-     *        "12월 30일" → LocalDate(현재연도, 12, 30)
-     * 5) 모든 패턴 실패 → null 반환
-     *
-     * @param dateStr OCR에서 추출된 날짜 문자열
-     * @return 파싱된 LocalDate, 실패 시 null
-     */
+    // 날짜 문자열 -> LocalDate
     private LocalDate parseDate(String dateStr) {
         if (dateStr == null || dateStr.isBlank()) return null;
 
@@ -339,18 +273,7 @@ public class TicketService {
         return null;
     }
 
-    /**
-     * 다양한 형식의 시간 문자열을 LocalTime으로 변환한다.
-     *
-     * [처리 순서]
-     * 1) null 또는 빈 문자열 → null 반환
-     * 2) "H:mm" 또는 "HH:mm" 형식 (예: "9:00", "13:23")
-     * 3) 한국어 오전/오후 형식 (예: "오전 9시", "오후 2시 30분")
-     * 4) 모든 패턴 실패 → null 반환
-     *
-     * @param timeStr OCR에서 추출된 시간 문자열
-     * @return 파싱된 LocalTime, 실패 시 null
-     */
+    // 시간 문자열 -> LocalTime
     private LocalTime parseTime(String timeStr) {
         if (timeStr == null || timeStr.isBlank()) return null;
 
@@ -387,26 +310,13 @@ public class TicketService {
         return null;
     }
 
-    /**
-     * rawText 배열을 공백으로 JOIN하여 하나의 문자열로 만든다.
-     * null이거나 비어있으면 빈 문자열을 반환한다.
-     *
-     * @param rawTextList OCR 인식 텍스트 배열 (예: ["서울", "부산", "KTX"])
-     * @return JOIN된 문자열 (예: "서울 부산 KTX")
-     */
+    // rawText 배열을 공백으로 JOIN하여 하나의 문자열로 만든다.
     private String joinRawText(List<String> rawTextList) {
         if (rawTextList == null || rawTextList.isEmpty()) return "";
         return String.join(" ", rawTextList);
     }
 
-    /**
-     * 네이티브 쿼리 결과(Map)를 TicketResponse DTO로 변환한다.
-     * created_at, updated_at은 DB 드라이버에 따라 Instant 또는 Timestamp로 올 수 있으므로
-     * 두 경우를 모두 처리한다.
-     *
-     * @param row 네이티브 쿼리 결과 Map (컬럼명 → 값)
-     * @return 변환된 TicketResponse (similarity는 설정하지 않음)
-     */
+    // 네이티브 쿼리 결과(Map)를 TicketResponse DTO로 변환한다.
     private TicketResponse mapRowToTicketResponse(Map<String, Object> row) {
         TicketResponse response = new TicketResponse();
 
@@ -451,13 +361,7 @@ public class TicketService {
         return response;
     }
 
-    /**
-     * DB에서 반환된 TIMESTAMP 값을 LocalDateTime으로 변환한다.
-     * JDBC 드라이버에 따라 Instant 또는 java.sql.Timestamp로 올 수 있다.
-     *
-     * @param obj DB에서 반환된 TIMESTAMP 값
-     * @return LocalDateTime (변환 불가 시 null)
-     */
+    // TIMESTAMP 필드: Instant 또는 java.sql.Timestamp → LocalDateTime 변환
     private LocalDateTime toLocalDateTime(Object obj) {
         if (obj instanceof Instant) {
             return ((Instant) obj).atZone(ZoneId.systemDefault()).toLocalDateTime();

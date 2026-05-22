@@ -47,7 +47,7 @@ public class AuthService {
         user.setProvider("local");  // 직접 가입 = "local" 제공자
         user.setEmail(request.getEmail());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));  // BCrypt 해싱
-        user.setName(request.getName());
+        user.setName(request.getEmail().split("@")[0]);  // 이메일 앞부분을 닉네임으로 자동 설정
 
         // DB에 저장 (JPA가 UUID 자동 생성, @PrePersist로 createdAt 설정)
         user = userRepository.save(user);
@@ -92,9 +92,11 @@ public class AuthService {
         if (userAuthProvider != null) {
             bsUser = getUserById(userAuthProvider.getUserId());
         } else {
-            // 이메일이 같은 기존 계정이 있으면 그 계정에 소셜 로그인만 연결한다.
-            // 별도 계정을 다시 만들지 않는 이유는 프론트와 카드 데이터가 모두 userId에 묶여 있어서,
-            // 같은 사람인데 계정이 갈라지면 기존 데이터 접근이 끊기기 때문이다.
+            /*
+             이메일이 같은 기존 계정이 있으면 그 계정에 소셜 로그인만 연결한다.
+             별도 계정을 다시 만들지 않는 이유는 프론트와 카드 데이터가 모두 userId에 묶여 있어서,
+              같은 사람인데 계정이 갈라지면 기존 데이터 접근이 끊기기 때문이다.
+            */
             bsUser = userRepository.findByEmail(bsProfile.getEmail())
                     .orElseGet(() -> createOAuthUser(bsProfile));
             userAuthProvider = createUserAuthProvider(bsUser, bsProfile);
@@ -171,8 +173,8 @@ public class AuthService {
     }
 
     private void validateSignupRequest(SignupRequest request) {
-        if (request == null || isBlank(request.getEmail()) || isBlank(request.getPassword()) || isBlank(request.getName())) {
-            throw new RuntimeException("Email, password and name are required");
+        if (request == null || isBlank(request.getEmail()) || isBlank(request.getPassword())) {
+            throw new RuntimeException("Email and password are required");
         }
     }
 
@@ -187,9 +189,11 @@ public class AuthService {
             throw new RuntimeException("OAuth provider information is missing");
         }
         if (isBlank(bsProfile.getEmail())) {
-            // 현재 users.email 컬럼은 NOT NULL + UNIQUE 이다.
-            // 그래서 이메일이 없는 소셜 계정을 강제로 저장하면 DB 제약을 깨거나
-            // 임시 이메일로 잘못 연결될 수 있다. 명시적으로 실패시켜 안전하게 막는다.
+            /*
+              현재 users.email 컬럼은 NOT NULL + UNIQUE 이다.
+              그래서 이메일이 없는 소셜 계정을 강제로 저장하면 DB 제약을 깨거나
+              임시 이메일로 잘못 연결될 수 있다. 명시적으로 실패시켜 안전하게 막는다.
+             */
             throw new RuntimeException("Email is required from OAuth provider");
         }
         if (isBlank(bsProfile.getName())) {

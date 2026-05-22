@@ -2,6 +2,7 @@ package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
 import com.mora.dto.auth.AuthResponse;
+
 import com.mora.dto.auth.ChangeNameRequest;
 import com.mora.dto.auth.ChangePasswordRequest;
 import com.mora.dto.auth.LoginRequest;
@@ -16,6 +17,7 @@ import com.mora.service.GoogleOAuthService;
 import com.mora.service.KakaoOAuthService;
 import com.mora.service.NaverOAuthService;
 import com.mora.service.OAuthStateService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
+@Tag(name = "인증", description = "회원가입, 로그인, 소셜 로그인(Google/Kakao/Naver) API")
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
@@ -61,10 +64,7 @@ public class AuthController {
         this.frontendUrl = normalizeFrontendUrl(frontendUrl);
     }
 
-    /**
-     * 회원가입 엔드포인트.
-     * 이메일 중복 시 400 에러를 반환한다.
-     */
+    // 회원가입 엔드포인트 (이메일 중복 시 400 에러 반환함.)
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<AuthResponse>> signup(@RequestBody SignupRequest request) {
         try {
@@ -75,10 +75,7 @@ public class AuthController {
         }
     }
 
-    /**
-     * 로그인 엔드포인트.
-     * 이메일/비밀번호 불일치 시 400 에러를 반환한다.
-     */
+    // 로그인 엔드포인트 (이메일/비밀번호 불일치 시 400 에러 반환함.)
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<AuthResponse>> login(@RequestBody LoginRequest request) {
         try {
@@ -89,10 +86,10 @@ public class AuthController {
         }
     }
 
-    /**
-     * 현재 로그인한 사용자의 정보를 조회하는 엔드포인트.
-     * Authorization 헤더에서 JWT 토큰을 추출하여 사용자를 식별한다.
-     * 토큰이 없거나 유효하지 않으면 401 에러를 반환한다.
+    /*
+     현재 로그인한 사용자의 정보를 조회하는 엔드포인트로,
+     Authorization 헤더에서 JWT 토큰을 추출하여 사용자를 식별함.
+     (토큰이 없으면 401, 토큰이 유효하지 않으면 400 에러 반환)
      */
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<UserResponse>> me(HttpServletRequest request) {
@@ -107,7 +104,7 @@ public class AuthController {
         }
     }
 
-    /**
+    /*
      * 닉네임 변경.
      * 인증된 사용자의 표시 이름만 변경한다. 다른 필드는 영향받지 않는다.
      */
@@ -125,12 +122,12 @@ public class AuthController {
         }
     }
 
-    /**
+    /*
      * 비밀번호 변경.
      * 보안:
-     *  - 토큰에서만 userId 추출 (body 무시) → IDOR 차단
-     *  - Bucket4j로 IP당 분당 5회 제한 → 무차별 대입 완화
-     *  - 실제 검증/해싱은 서비스 계층에서 처리
+       - 토큰에서만 userId 추출 (body 무시) → IDOR 차단
+       - Bucket4j로 IP당 분당 5회 제한 → 무차별 대입 완화
+       - 실제 검증/해싱은 서비스 계층에서 처리
      */
     @PatchMapping("/me/password")
     public ResponseEntity<ApiResponse<Void>> changePassword(HttpServletRequest request,
@@ -186,11 +183,12 @@ public class AuthController {
         }
     }
 
-    /**
-     * Google OAuth 로그인 시작 엔드포인트.
-     * 리다이렉트 방식은 프론트가 provider SDK를 직접 들고 있지 않아도 되므로
-     * 현재 "백엔드만 수정" 제약과 가장 잘 맞는다.
+    /*
+    OAuth 소셜 로그인 공통 패턴
+    - {provider}/login: 로그인 시작 엔드포인트 (백이 OAuth로 리다이렉트하는 형식)
+    - {provider}/callback : OAuth 콜백 엔드포인트 (OAuth에서 리다이렉트 후 처리)
      */
+
     @GetMapping("/google/login")
     public ResponseEntity<Void> googleLogin() {
         return createOAuthRedirectResponse(googleOAuthService.getAuthorizationUrl(oauthStateService.createState("google")));

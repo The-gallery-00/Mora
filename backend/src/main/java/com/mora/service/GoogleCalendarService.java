@@ -70,10 +70,11 @@ public class GoogleCalendarService {
         }
 
         GoogleUserResponse googleUser = requestGoogleUser(tokenResponse.getAccessToken());
-        GoogleCalendarToken token = tokenRepository.findByUserId(stateService.getUserId(state))
+        java.util.UUID userId = stateService.getUserId(state);
+        GoogleCalendarToken token = tokenRepository.findByUserId(userId)
                 .orElseGet(GoogleCalendarToken::new);
 
-        token.setUserId(stateService.getUserId(state));
+        token.setUserId(userId);
         token.setGoogleEmail(googleUser == null ? null : googleUser.getEmail());
         token.setAccessToken(tokenResponse.getAccessToken());
         if (tokenResponse.getRefreshToken() != null && !tokenResponse.getRefreshToken().isBlank()) {

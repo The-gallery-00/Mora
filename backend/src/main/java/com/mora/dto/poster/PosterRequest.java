@@ -12,7 +12,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class PosterSaveRequest {
+public class PosterRequest {
 
     private String docType;
     private BigDecimal classificationConfidence;

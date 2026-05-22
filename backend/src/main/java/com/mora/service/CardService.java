@@ -2,10 +2,14 @@ package com.mora.service;
 
 import com.mora.dto.api.ServiceResult;
 import com.mora.dto.card.CardResponse;
-import com.mora.dto.card.CardSaveRequest;
+import com.mora.dto.card.CardRequest;
 import com.mora.entity.BusinessCard;
 import com.mora.repository.BusinessCardRepository;
 import org.springframework.stereotype.Service;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -30,7 +34,7 @@ public class CardService {
         this.embeddingService = embeddingService;
     }
 
-    public ServiceResult<CardResponse> save(UUID userId, CardSaveRequest request) {
+    public ServiceResult<CardResponse> save(UUID userId, CardRequest request) {
         String textForEmbedding = buildEmbeddingText(
                 request.getName(), request.getCompany(), request.getPosition(),
                 request.getPhone(), request.getEmail(), request.getRawOcrText()
@@ -55,20 +59,21 @@ public class CardService {
         return ServiceResult.ok(response);
     }
 
-    public List<CardResponse> listByUser(UUID userId) {
-        return cardRepository.findByUserIdOrderByCreatedAtDesc(userId)
-                .stream()
-                .map(CardResponse::from)
-                .toList();
+    public CardResponse findById(UUID userId, UUID cardId) {
+        BusinessCard card = cardRepository.findByIdAndUserId(cardId, userId)
+                .orElseThrow(() -> new RuntimeException("Card not found"));
+        return CardResponse.from(card);
     }
 
-    public ServiceResult<CardResponse> update(UUID userId, UUID cardId, CardSaveRequest request) {
-        BusinessCard card = cardRepository.findById(cardId)
-                .orElseThrow(() -> new RuntimeException("Card not found"));
+    public Page<CardResponse> listByUser(UUID userId, int page, int size) {
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return cardRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
+                .map(CardResponse::from);
+    }
 
-        if (!card.getUserId().equals(userId)) {
-            throw new RuntimeException("Unauthorized");
-        }
+    public ServiceResult<CardResponse> update(UUID userId, UUID cardId, CardRequest request) {
+        BusinessCard card = cardRepository.findByIdAndUserId(cardId, userId)
+                .orElseThrow(() -> new RuntimeException("Card not found or unauthorized"));
 
         // 필드 업데이트 (null이 아닌 경우에만 수정 - 부분 수정 지원)
         if (request.getName() != null) card.setName(request.getName());
@@ -94,23 +99,16 @@ public class CardService {
     }
 
     public void delete(UUID userId, UUID cardId) {
-        BusinessCard card = cardRepository.findById(cardId)
-                .orElseThrow(() -> new RuntimeException("Card not found"));
-
-        if (!card.getUserId().equals(userId)) {
-            throw new RuntimeException("Unauthorized");
-        }
+        BusinessCard card = cardRepository.findByIdAndUserId(cardId, userId)
+                .orElseThrow(() -> new RuntimeException("Card not found or unauthorized"));
 
         cardRepository.delete(card);
     }
 
-    /**
-     * 하이브리드 검색 (pg_trgm Fuzzy + pgvector Vector)을 수행한다.
-     * 임베딩 생성 실패 시 Fuzzy 결과만 반환하고 경고 메시지를 포함한다.
-     */
+    // 하이브리드 검색(fuzzy+vector)
     public ServiceResult<List<CardResponse>> hybridSearch(UUID userId, String query, int topK) {
 
-        // ── 1단계: 동적 임계값 Fuzzy 검색 ──────────────────────────────────
+        // 1) 동적 임계값 Fuzzy 검색
         double threshold = FUZZY_THRESHOLD_START;
         List<Map<String, Object>> fuzzyResults = Collections.emptyList();
 
@@ -134,14 +132,14 @@ public class CardService {
             fuzzyRowMap.put(id, row);
         }
 
-        // ── 2단계: Vector 검색 ───────────────────────────────────────────────
+        // 2) Vector 검색
         Map<UUID, Double> vectorScoreMap = new HashMap<>();
         Map<UUID, Map<String, Object>> vectorRowMap = new HashMap<>();
         boolean embeddingFailed = false;
 
         String queryEmbedding = embeddingService.getEmbedding(query);
         if (queryEmbedding != null) {
-            List<Map<String, Object>> vectorResults = cardRepository.searchByVector(userId, queryEmbedding, topK);
+            List<Map<String, Object>> vectorResults = cardRepository.vectorSearch(userId, queryEmbedding, topK);
             for (Map<String, Object> row : vectorResults) {
                 UUID id = UUID.fromString(row.get("id").toString());
                 double score = row.get("vector_score") != null
@@ -154,7 +152,7 @@ public class CardService {
             embeddingFailed = true;
         }
 
-        // ── 3단계: 점수 합산 및 최종 정렬 ───────────────────────────────────
+        // 3) 점수 합산 및 최종 정렬
         Set<UUID> allIds = new HashSet<>();
         allIds.addAll(fuzzyScoreMap.keySet());
         allIds.addAll(vectorScoreMap.keySet());

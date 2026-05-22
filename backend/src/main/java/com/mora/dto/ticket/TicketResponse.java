@@ -54,11 +54,9 @@ public class TicketResponse {
      */
     private Double similarity;
 
-    /**
+    /*
      Ticket 엔티티 -> TicketResponse DTO로 변환.
      similarity는 설정x (하이브리드 검색이 아닌 일반 조회용).
-     @param ticket Ticket 엔티티
-     @return 변환된 TicketResponse
      */
     public static TicketResponse from(Ticket ticket) {
         TicketResponse response = new TicketResponse();

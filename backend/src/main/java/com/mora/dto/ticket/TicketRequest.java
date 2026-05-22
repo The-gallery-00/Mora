@@ -8,7 +8,7 @@ import java.util.List;
 
 @Getter
 @Setter
-public class TicketSaveRequest {
+public class TicketRequest {
 
     // 문서 유형 (ex. "TICKET")
     private String docType;
