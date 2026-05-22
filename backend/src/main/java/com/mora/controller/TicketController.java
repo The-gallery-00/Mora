@@ -1,9 +1,10 @@
 package com.mora.controller;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import com.mora.dto.api.ApiResponse;
 import com.mora.dto.api.ServiceResult;
 import com.mora.dto.ticket.TicketResponse;
-import com.mora.dto.ticket.TicketSaveRequest;
+import com.mora.dto.ticket.TicketRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.TicketService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "티켓", description = "티켓 관리 API")
 @RestController
 @RequestMapping("/api/tickets")
 public class TicketController {
@@ -26,7 +28,7 @@ public class TicketController {
         this.jwtUtil = jwtUtil;
     }
 
-    /**
+    /*
      * Authorization 헤더에서 JWT 토큰을 추출하여 사용자 UUID를 반환한다.
      * 토큰이 없거나 유효하지 않으면 null을 반환한다.
      */
@@ -40,7 +42,7 @@ public class TicketController {
         }
     }
 
-    /**
+    /*
      * 티켓을 저장한다.
      * 프론트엔드가 OCR 결과를 사용자에게 보여주고, 사용자가 확인/수정 후 저장 시 호출된다.
      * rawText 배열을 공백 JOIN하고, OpenAI 임베딩을 생성하여 함께 저장한다.
@@ -49,7 +51,7 @@ public class TicketController {
     @PostMapping("/save")
     public ResponseEntity<ApiResponse<TicketResponse>> save(
             HttpServletRequest request,
-            @RequestBody TicketSaveRequest body) {
+            @RequestBody TicketRequest body) {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
@@ -62,11 +64,9 @@ public class TicketController {
         }
     }
 
-    /**
+    /*
      * 현재 사용자의 티켓 목록을 최신순으로 페이지네이션 조회한다.
      * GET /api/tickets?page=0&size=10
-     * @param page 페이지 번호 (기본값: 0, 0부터 시작)
-     * @param size 페이지당 항목 수 (기본값: 10)
      */
     @GetMapping
     public ResponseEntity<ApiResponse<Page<TicketResponse>>> list(
@@ -83,9 +83,8 @@ public class TicketController {
         }
     }
 
-    /**
-     * 특정 티켓을 단건 조회한다.
-     * 본인 소유 티켓만 조회 가능하다.
+    /*
+     * 특정 티켓을 조회한다.(본인 소유 티켓만 조회 가능)
      * GET /api/tickets/{id}
      */
     @GetMapping("/{id}")
@@ -102,9 +101,8 @@ public class TicketController {
         }
     }
 
-    /**
-     * 특정 티켓의 정보를 수정한다.
-     * 본인 소유 티켓만 수정 가능하다.
+    /*
+     * 특정 티켓의 정보를 수정한다. (본인 소유 티켓만 수정 가능)
      * rawText가 포함된 경우 임베딩도 재생성한다.
      * PUT /api/tickets/{id}
      */
@@ -112,7 +110,7 @@ public class TicketController {
     public ResponseEntity<ApiResponse<TicketResponse>> update(
             HttpServletRequest request,
             @PathVariable Integer id,
-            @RequestBody TicketSaveRequest body) {
+            @RequestBody TicketRequest body) {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
@@ -125,9 +123,8 @@ public class TicketController {
         }
     }
 
-    /**
-     * 특정 티켓을 삭제한다.
-     * 본인 소유 티켓만 삭제 가능하다.
+    /*
+     * 특정 티켓을 삭제한다.(본인 소유 티켓만 삭제 가능)
      * DELETE /api/tickets/{id}
      */
     @DeleteMapping("/{id}")
@@ -144,15 +141,8 @@ public class TicketController {
         }
     }
 
-    /**
+    /*
      * 하이브리드 검색 (pg_trgm Fuzzy + pgvector Vector)을 수행한다.
-     * [검색 방식]
-     * - Fuzzy: pg_trgm 오타 허용 검색 (동적 임계값 1.0→0.6)
-     * - Vector: OpenAI 임베딩 기반 의미 유사도 검색
-     * - 최종 점수 = Fuzzy점수 × 60% + Vector점수 × 40%
-     * GET /api/tickets/search?q=검색어&topK=5
-     * @param query 검색 키워드 (예: "서울 부산 KTX")
-     * @param topK  반환할 최대 결과 수 (기본값: 5)
      */
     @GetMapping("/search")
     public ResponseEntity<ApiResponse<List<TicketResponse>>> search(
