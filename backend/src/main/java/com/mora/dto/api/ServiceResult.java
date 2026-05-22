@@ -1,8 +1,6 @@
 package com.mora.dto.api;
 
-/**
- * @param <T> 실제 반환 데이터 타입
- */
+//임베딩 실패 시 경고 메시지와 데이터를 반환하기 위한 클래스.
 public class ServiceResult<T> {
 
     private final T data;
