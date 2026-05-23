@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 @Repository
+@SuppressWarnings({"SqlResolve", "SqlNoDataSourceInspection"})
 public interface ReceiptRepository extends JpaRepository<Receipt, Integer> {
 
     @EntityGraph(attributePaths = "items")
