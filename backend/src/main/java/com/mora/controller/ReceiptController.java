@@ -11,7 +11,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -95,23 +94,6 @@ public class ReceiptController {
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
             receiptService.delete(userId, id);
             return ResponseEntity.ok(ApiResponse.ok(null));
-        } catch (RuntimeException e) {
-            return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
-        }
-    }
-
-    @GetMapping("/search")
-    public ResponseEntity<ApiResponse<List<ReceiptResponse>>> search(
-            HttpServletRequest request,
-            @RequestParam("q") String query,
-            @RequestParam(value = "topK", defaultValue = "5") int topK) {
-        try {
-            UUID userId = getUserId(request);
-            if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            ServiceResult<List<ReceiptResponse>> result = receiptService.hybridSearch(userId, query, topK);
-            ApiResponse<List<ReceiptResponse>> apiResponse = ApiResponse.ok(result.getData());
-            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
-            return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }

@@ -32,7 +32,6 @@ public class ReceiptResponse {
     private List<ReceiptItemResponse> items;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private Double similarity;
 
     public static ReceiptResponse from(Receipt receipt) {
         ReceiptResponse response = new ReceiptResponse();
