@@ -9,7 +9,7 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class CardSaveRequest {
+public class CardRequest {
 
     private String name;
     private String company;

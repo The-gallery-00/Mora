@@ -278,6 +278,59 @@ export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<Pos
   }
 }
 
+/** 내 계정 정보 조회 (provider 확인용) */
+export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 닉네임 변경 */
+export async function changeName(name: string): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ name }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `변경 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 비밀번호 변경 (현재 비번 확인 후 새 비번 설정) */
+export async function changePassword(current: string, next: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me/password`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ currentPassword: current, newPassword: next }),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 429) {
+      return { success: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `변경 실패 (${res.status})` }
+    }
+    return { success: true, data: undefined }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** 키워드로 명함 검색 */
 export async function searchCards(query: string): Promise<ApiResponse<BusinessCard[]>> {
   try {

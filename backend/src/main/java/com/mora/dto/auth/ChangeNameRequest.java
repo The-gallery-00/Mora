@@ -9,7 +9,6 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class SignupRequest {
-    private String email;
-    private String password;
+public class ChangeNameRequest {
+    private String name;
 }

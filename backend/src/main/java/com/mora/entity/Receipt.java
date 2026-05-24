@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -16,8 +18,8 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor
 @Entity
-@Table(name = "tickets")
-public class Ticket {
+@Table(name = "receipts")
+public class Receipt {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -27,44 +29,48 @@ public class Ticket {
     private UUID userId;
 
     @Column(nullable = false, length = 30)
-    private String docType;
+    private String docType = "RECEIPT";
 
-    // 문서 분류 신뢰도 (ex. 0.950, 소수점 3자리)
     @Column(precision = 4, scale = 3)
     private BigDecimal classificationConfidence;
 
+    @Column(length = 255)
+    private String merchantName;
+
+    @Column(columnDefinition = "TEXT")
+    private String merchantAddress;
+
+    private LocalDate purchaseDate;
+
+    private LocalTime purchaseTime;
+
     @Column(length = 50)
-    private String transportType;
+    private String paymentMethod;
 
-    @Column(length = 255)
-    private String departureLocation;
+    @Column(length = 100)
+    private String cardCompany;
 
-    private LocalDate departureDate;
+    @Column(precision = 12, scale = 2)
+    private BigDecimal totalAmount;
 
-    private LocalTime departureTime;
+    @Column(length = 10)
+    private String currencyCode = "KRW";
 
-    @Column(length = 255)
-    private String arrivalLocation;
-
-    private LocalDate arrivalDate;
-
-    private LocalTime arrivalTime;
-
-    // OCR 인식 텍스트 배열을 공백으로 조인한 전체 텍스트 (임베딩 입력용)
     @Column(columnDefinition = "TEXT")
     private String rawText;
 
-    // 파싱된 구조화 데이터 원본 (JSONB)
     @Column(columnDefinition = "jsonb")
     private String parsedJson;
 
-    // OCR 응답 전체 원본 (JSONB)
     @Column(columnDefinition = "jsonb")
     private String rawJson;
 
-    // rawText를 OpenAI text-embedding-ada-002로 임베딩한 1536차원 벡터
     @Column(columnDefinition = "vector(1536)")
     private String embedding;
+
+    @OneToMany(mappedBy = "receipt", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    private List<ReceiptItem> items = new ArrayList<>();
 
     @Column(updatable = false)
     private LocalDateTime createdAt;
@@ -77,33 +83,34 @@ public class Ticket {
         this.updatedAt = LocalDateTime.now();
     }
 
-    // 엔티티가 수정될 때마다 호출되어 updatedAt을 현재 시각으로 갱신한다.
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public void replaceItems(List<ReceiptItem> newItems) {
+        items.clear();
+        if (newItems == null) return;
+        for (ReceiptItem item : newItems) {
+            addItem(item);
+        }
+    }
+
+    public void addItem(ReceiptItem item) {
+        item.setReceipt(this);
+        items.add(item);
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        Ticket ticket = (Ticket) o;
-        return Objects.equals(id, ticket.id);
+        Receipt receipt = (Receipt) o;
+        return Objects.equals(id, receipt.id);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(id);
-    }
-
-    @Override
-    public String toString() {
-        return "Ticket{" +
-                "id=" + id +
-                ", userId=" + userId +
-                ", transportType='" + transportType + '\'' +
-                ", departureLocation='" + departureLocation + '\'' +
-                ", arrivalLocation='" + arrivalLocation + '\'' +
-                '}';
     }
 }
