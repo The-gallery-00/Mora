@@ -17,7 +17,7 @@
 // - 로그인 페이지와 동일한 UI 컴포넌트를 재사용하고,
 //   API 엔드포인트/문구만 signup 모드로 달라진다.
 // ============================================================================
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthForm } from '@/components/shared/AuthForm'
 import { Hero } from '@/components/shared/Hero'
@@ -32,6 +32,12 @@ export default function SignupPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+
+  useEffect(() => {
+    if (localStorage.getItem('mora_token')) {
+      router.replace('/dashboard')
+    }
+  }, [router])
 
   // 회원가입 요청 후 즉시 로그인 상태로 전환(토큰 저장)
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -75,8 +81,9 @@ export default function SignupPage() {
           name: authData.name ?? email.split('@')[0],
         }),
       )
+      window.dispatchEvent(new Event('mora-session-change'))
 
-      window.location.href = '/dashboard'
+      router.replace('/dashboard')
     } catch {
       setError('서버에 연결할 수 없습니다')
     } finally {

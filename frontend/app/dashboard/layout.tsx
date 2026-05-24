@@ -1,8 +1,8 @@
-'use client'
+﻿'use client'
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 const SEARCH_CATEGORIES = [
   { label: '명함', value: 'BUSINESS_CARD' },
@@ -18,6 +18,54 @@ const STORAGE_ITEMS = [
   { label: '영수증', href: '/dashboard/storage/receipts' },
 ]
 
+type Session = {
+  ready: boolean
+  hasToken: boolean
+  userName: string
+}
+
+const EMPTY_SESSION: Session = { ready: false, hasToken: false, userName: '' }
+let cachedToken: string | null | undefined
+let cachedUser: string | null | undefined
+let cachedSession = EMPTY_SESSION
+
+function readSession(): Session {
+  if (typeof window === 'undefined') {
+    return EMPTY_SESSION
+  }
+
+  const token = localStorage.getItem('mora_token')
+  const user = localStorage.getItem('mora_user')
+
+  if (token === cachedToken && user === cachedUser) {
+    return cachedSession
+  }
+
+  let userName = ''
+
+  if (user) {
+    try {
+      userName = JSON.parse(user).name || ''
+    } catch {}
+  }
+
+  cachedToken = token
+  cachedUser = user
+  cachedSession = { ready: true, hasToken: !!token, userName }
+
+  return cachedSession
+}
+
+function subscribeSession(onStoreChange: () => void) {
+  window.addEventListener('storage', onStoreChange)
+  window.addEventListener('mora-session-change', onStoreChange)
+
+  return () => {
+    window.removeEventListener('storage', onStoreChange)
+    window.removeEventListener('mora-session-change', onStoreChange)
+  }
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -25,7 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [searchCategory, setSearchCategory] = useState('BUSINESS_CARD')
   const [isCategoryOpen, setIsCategoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [session, setSession] = useState({ ready: false, hasToken: false, userName: '' })
+  const session = useSyncExternalStore(subscribeSession, readSession, () => EMPTY_SESSION)
   const storageRef = useRef<HTMLDivElement>(null)
   const categoryRef = useRef<HTMLDivElement>(null)
 
@@ -49,17 +97,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       window.history.replaceState(null, '', window.location.pathname)
     }
 
-    const token = localStorage.getItem('mora_token')
-    let userName = ''
-    const user = localStorage.getItem('mora_user')
-
-    if (user) {
-      try {
-        userName = JSON.parse(user).name || ''
-      } catch {}
-    }
-
-    setSession({ ready: true, hasToken: !!token, userName })
+    window.dispatchEvent(new Event('mora-session-change'))
   }, [])
 
   useEffect(() => {
@@ -68,7 +106,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [router, session.hasToken, session.ready])
 
-  // 외부 클릭 시 드롭다운 닫기
+  // 드롭다운 바깥 클릭 시 닫기
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (storageRef.current && !storageRef.current.contains(e.target as Node)) {
@@ -81,12 +119,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-
-  function handleLogout() {
-    localStorage.removeItem('mora_token')
-    localStorage.removeItem('mora_user')
-    router.replace('/')
-  }
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -110,20 +142,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const currentCategory = SEARCH_CATEGORIES.find(c => c.value === searchCategory)
 
   return (
-    <div style={{ minHeight: '100vh', background: '#FFFFFF' }}>
-      {/* 상단 네비바 */}
+    <div style={{ minWidth: 1200, minHeight: '100vh', background: '#FFFFFF' }}>
+      {/* 상단 네비게이션 */}
       <header
         style={{
           position: 'fixed',
           top: 0,
-          left: 0,
-          right: 0,
+          left: 'max(0px, calc((100vw - 1200px) / 2))',
+          width: 1200,
+          boxSizing: 'border-box',
           height: 64,
           background: '#FFFFFF',
-          borderBottom: '1px solid #CBD5E1',
           display: 'flex',
           alignItems: 'center',
-          padding: '0 32px',
+          padding: '0 40px',
           zIndex: 1000,
           gap: 24,
         }}
@@ -161,15 +193,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           }}
         >
           {/* 카테고리 드롭다운 */}
-          <div ref={categoryRef} style={{ position: 'relative', flexShrink: 0 }}>
+          <div ref={categoryRef} style={{ position: 'relative', flexShrink: 0, width: 76 }}>
             <button
               type="button"
               onClick={() => setIsCategoryOpen(!isCategoryOpen)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'center',
                 gap: 4,
                 padding: '0 12px',
+                width: '100%',
                 height: 38,
                 border: 'none',
                 borderRight: '1px solid #CBD5E1',
@@ -181,7 +215,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               }}
             >
               {currentCategory?.label}
-              <span style={{ fontSize: 10, color: '#999' }}>▼</span>
+              <span style={{ fontSize: 10, color: '#999' }}>▾</span>
             </button>
             {isCategoryOpen && (
               <div
@@ -195,6 +229,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   borderRadius: 8,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                   overflow: 'hidden',
+                  minWidth: 76,
                   zIndex: 100,
                 }}
               >
@@ -212,7 +247,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       fontSize: 13,
                       color: '#333',
                       cursor: 'pointer',
-                      textAlign: 'left',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {cat.label}
@@ -222,7 +258,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             )}
           </div>
 
-          {/* 검색 입력 */}
+          {/* 검색어 입력 */}
           <input
             type="text"
             value={searchQuery}
@@ -261,7 +297,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
         </form>
 
-        {/* 우측 메뉴 */}
+        {/* 오른쪽 메뉴 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
           {/* 업로드 */}
           <Link
@@ -312,21 +348,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
               </svg>
               보관함
-              <span style={{ fontSize: 10, color: '#999' }}>▼</span>
+              <span style={{ fontSize: 10, color: '#999' }}>▾</span>
             </button>
             {isStorageOpen && (
               <div
                 style={{
                   position: 'absolute',
                   top: '100%',
-                  right: 0,
+                  left: 0,
                   marginTop: 4,
+                  width: '100%',
                   background: '#FFFFFF',
                   border: '1px solid #CBD5E1',
                   borderRadius: 8,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
                   overflow: 'hidden',
-                  minWidth: 120,
+                  boxSizing: 'border-box',
                   zIndex: 100,
                 }}
               >
@@ -337,11 +374,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     onClick={() => setIsStorageOpen(false)}
                     style={{
                       display: 'block',
-                      padding: '10px 16px',
+                      padding: '8px 12px',
                       fontSize: 13,
                       textDecoration: 'none',
                       color: pathname === item.href ? '#0077B6' : '#333',
                       background: pathname === item.href ? '#F0F9FF' : 'transparent',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {item.label}
@@ -405,10 +444,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               padding: '6px 12px',
               borderRadius: 8,
               marginLeft: 4,
-              cursor: 'pointer',
+              cursor: 'default',
             }}
-            onClick={handleLogout}
-            title="로그아웃"
           >
             <div
               style={{
@@ -434,6 +471,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </header>
 
       {/* 메인 콘텐츠 */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'fixed',
+          top: 64,
+          left: 0,
+          right: 0,
+          height: 1,
+          background: '#CBD5E1',
+          zIndex: 999,
+        }}
+      />
+
       <main style={{ paddingTop: 64, minHeight: '100vh' }}>
         {children}
       </main>

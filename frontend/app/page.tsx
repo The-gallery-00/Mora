@@ -5,7 +5,7 @@
 
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/common/Nav'
@@ -22,6 +22,32 @@ const C = {
   primaryDark: '#1D4ED8',
   ink: '#0F172A',
 } as const
+
+function readIsLoggedIn() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return !!localStorage.getItem('mora_token')
+}
+
+function subscribeAuth(onStoreChange: () => void) {
+  window.addEventListener('storage', onStoreChange)
+  window.addEventListener('mora-session-change', onStoreChange)
+  window.addEventListener('pageshow', onStoreChange)
+  window.addEventListener('focus', onStoreChange)
+
+  return () => {
+    window.removeEventListener('storage', onStoreChange)
+    window.removeEventListener('mora-session-change', onStoreChange)
+    window.removeEventListener('pageshow', onStoreChange)
+    window.removeEventListener('focus', onStoreChange)
+  }
+}
+
+function useIsLoggedIn() {
+  return useSyncExternalStore(subscribeAuth, readIsLoggedIn, () => false)
+}
 
 export default function LandingPage() {
   return (
@@ -44,6 +70,9 @@ export default function LandingPage() {
 /* ============== Hero ============== */
 
 function Hero() {
+  const isLoggedIn = useIsLoggedIn()
+  const ctaHref = isLoggedIn ? '/dashboard' : '/login'
+
   return (
     <section
       style={{
@@ -83,7 +112,7 @@ function Hero() {
         </p>
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <PrimaryCTA href="/signup">무료로 시작하기</PrimaryCTA>
+          <PrimaryCTA href={ctaHref}>무료로 시작하기</PrimaryCTA>
           <SecondaryCTA href="#how">사용법 보기</SecondaryCTA>
         </div>
 
@@ -659,6 +688,9 @@ function UseCases() {
 
 function FinalCTA() {
   const router = useRouter()
+  const isLoggedIn = useIsLoggedIn()
+  const ctaHref = isLoggedIn ? '/dashboard' : '/login'
+
   return (
     <section style={{ padding: '96px 24px', background: '#FFFFFF' }}>
       <div
@@ -683,7 +715,7 @@ function FinalCTA() {
         <div style={{ display: 'inline-flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
           <button
             type="button"
-            onClick={() => router.push('/signup')}
+            onClick={() => router.push(ctaHref)}
             style={{
               padding: '14px 22px', borderRadius: 12,
               background: '#FFFFFF', color: C.navy, border: 'none',
@@ -693,7 +725,7 @@ function FinalCTA() {
             무료로 시작하기 →
           </button>
           <Link
-            href="/login"
+            href={ctaHref}
             style={{
               padding: '14px 22px', borderRadius: 12,
               background: 'transparent', color: '#FFFFFF',
@@ -701,7 +733,7 @@ function FinalCTA() {
               fontSize: 15, fontWeight: 600, textDecoration: 'none',
             }}
           >
-            로그인
+            {isLoggedIn ? '대시보드로 이동' : '로그인'}
           </Link>
         </div>
       </div>
@@ -1233,7 +1265,7 @@ function Footer() {
         </div>
         <div style={{ display: 'flex', gap: 18, fontSize: 12 }}>
           <Link href="/login"  style={{ color: C.mute, textDecoration: 'none' }}>로그인</Link>
-          <Link href="/signup" style={{ color: C.mute, textDecoration: 'none' }}>시작하기</Link>
+          <Link href="/login" style={{ color: C.mute, textDecoration: 'none' }}>시작하기</Link>
           <a href="https://github.com/lavermeanyou/Mora" target="_blank" rel="noreferrer" style={{ color: C.mute, textDecoration: 'none' }}>
             GitHub
           </a>

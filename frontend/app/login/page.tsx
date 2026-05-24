@@ -17,7 +17,7 @@
 // - UI 뼈대(폼 레이아웃)는 AuthForm/Hero 컴포넌트로 분리되어 있어
 //   이 파일은 "페이지 상태 + 로그인 로직"에 집중한다.
 // ============================================================================
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthForm } from '@/components/shared/AuthForm'
 import { Hero } from '@/components/shared/Hero'
@@ -32,6 +32,12 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+
+  useEffect(() => {
+    if (localStorage.getItem('mora_token')) {
+      router.replace('/dashboard')
+    }
+  }, [router])
 
   // 이메일/비밀번호 로그인 요청 후 토큰 저장
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -71,8 +77,9 @@ export default function LoginPage() {
           name: authData.name ?? email.split('@')[0],
         }),
       )
+      window.dispatchEvent(new Event('mora-session-change'))
 
-      window.location.href = '/dashboard'
+      router.replace('/dashboard')
     } catch {
       setError('서버에 연결할 수 없습니다')
     } finally {
