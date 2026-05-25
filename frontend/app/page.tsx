@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════
+﻿// ═══════════════════════════════════════════════════════════════
 // app/page.tsx — Landing (clean AI SaaS layout)
 // Hero → Stats → Features → How it works → Use cases → CTA → Footer
 // ═══════════════════════════════════════════════════════════════
@@ -7,6 +7,18 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
+import {
+  Astroid,
+  Brain,
+  CalendarCheck2,
+  Camera,
+  FolderTree,
+  ScanText,
+  Search,
+  ShieldCheck,
+  type LucideIcon,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import Nav from '@/components/common/Nav'
 
@@ -57,9 +69,9 @@ export default function LandingPage() {
         <Hero />
         <StatsStrip />
         <ScrollPinnedShowcase />
+        <UseCases />
         <FeatureGrid />
         <HowItWorks />
-        <UseCases />
         <FinalCTA />
       </main>
       <Footer />
@@ -83,7 +95,6 @@ function Hero() {
       }}
     >
       <div style={{ maxWidth: 1200, margin: '0 auto', textAlign: 'center' }}>
-        <Eyebrow text="AI OCR · 문서 정리 자동화" />
         <h1
           style={{
             fontSize: 'clamp(36px, 5.6vw, 64px)',
@@ -95,8 +106,8 @@ function Hero() {
             maxWidth: 900,
           }}
         >
-          쌓여만 가는 문서, <br />
-          MORA가 한 번에 정리합니다.
+          복잡한 기록 정리, <br />
+          MORA 하나로 충분합니다.
         </h1>
         <p
           style={{
@@ -107,8 +118,8 @@ function Hero() {
             margin: '0 auto 36px',
           }}
         >
-          명함·티켓·포스터·영수증을 사진 한 장으로 인식해서 자동 분류·검색·동기화까지.
-          더 이상 사진첩을 뒤지지 마세요.
+          복잡한 입력 없이 사진만 올리세요. <br />
+          MORA가 정보를 읽고, 분류하고, 필요할 때 바로 찾을 수 있게 정리합니다.
         </p>
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -116,8 +127,8 @@ function Hero() {
           <SecondaryCTA href="#how">사용법 보기</SecondaryCTA>
         </div>
 
-        <p style={{ marginTop: 16, fontSize: 12, color: C.faint }}>
-          신용카드 불필요 · 30초 가입 · OCR 분석 무제한
+        <p style={{ marginTop: 16, fontSize: 14, color: C.faint }}>
+          AI OCR · 문서 정리 자동화
         </p>
 
         <ProductMockup />
@@ -138,11 +149,11 @@ function Eyebrow({ text }: { text: string }) {
         background: '#EFF6FF',
         border: '1px solid #DBEAFE',
         color: C.primaryDark,
-        fontSize: 12,
+        fontSize: 24,
         fontWeight: 600,
       }}
     >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.primary }} />
+      <span style={{ width: 12, height: 12, borderRadius: '50%', background: C.primary }} />
       {text}
     </span>
   )
@@ -158,7 +169,7 @@ function PrimaryCTA({ href, children }: { href: string; children: React.ReactNod
         gap: 8,
         padding: '14px 22px',
         borderRadius: 12,
-        background: C.navy,
+        background: C.primaryDark,
         color: '#FFF',
         fontSize: 15,
         fontWeight: 700,
@@ -278,7 +289,7 @@ function PhoneFrame({ children, tilt = 0, z = 1 }: { children: React.ReactNode; 
           <span>9:41</span>
           <span style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11 }}>
             <span>5G</span>
-            <span>●●●●</span>
+            <span></span>
           </span>
         </div>
         <div style={{ paddingTop: 44, height: '100%', overflow: 'hidden' }}>
@@ -534,20 +545,26 @@ function StatsStrip() {
 /* ============== Feature grid ============== */
 
 function FeatureGrid() {
-  const features = [
-    { icon: '📷', iconBg: '#DBEAFE', iconFg: '#2563EB', title: '한 장 찍으면 끝',     body: '카메라로 찍거나 사진을 끌어다 놓으세요. 명함·티켓·영수증을 자동으로 구분합니다.' },
-    { icon: '🧠', iconBg: '#EDE9FE', iconFg: '#6D28D9', title: 'OCR + NER 결합',     body: '글자만 읽는 게 아닙니다. 사람·날짜·금액·장소를 의미 단위로 추출해서 구조화합니다.' },
-    { icon: '🔍', iconBg: '#DCFCE7', iconFg: '#166534', title: '카테고리 통합 검색', body: '"3월 부산 출장 영수증"처럼 자연어로 찾으세요. 명함·티켓·문서를 한 번에 검색합니다.' },
-    { icon: '🔗', iconBg: '#FFEDD5', iconFg: '#9A3412', title: 'Google Calendar 연동', body: '추출된 일정은 캘린더로 자동 전송. 명함은 연락처로, 영수증은 가계부로 흘러갑니다.' },
-    { icon: '🛡', iconBg: '#FEE2E2', iconFg: '#B91C1C', title: '내 데이터는 내 통제', body: '검색 기록 삭제, 데이터 전체 다운로드/삭제 모두 한 클릭. 위치는 항상 투명하게.' },
-    { icon: '⚡', iconBg: '#FEF3C7', iconFg: '#B45309', title: '2초 이내 처리',       body: '평균 처리 시간 < 2초. 회의 끝나고 명함 받자마자 폰만 들어도 정리 완료.' },
+  const features: {
+    icon: LucideIcon
+    iconBg: string
+    iconFg: string
+    title: string
+    body: string
+  }[] = [
+    { icon: Camera, iconBg: '#DBEAFE', iconFg: '#2563EB', title: '이미지 업로드', body: '카메라 촬영, 앨범 선택, 드래그 앤 드롭으로 손쉽게 이미지를 추가할 수 있습니다.' },
+    { icon: ScanText, iconBg: '#EDE9FE', iconFg: '#6D28D9', title: 'OCR 텍스트 인식', body: '명함, 영수증, 티켓, 포스터 속 텍스트를 빠르게 인식합니다.' },
+    { icon: Astroid, iconBg: '#DCFCE7', iconFg: '#166534', title: 'AI 정보 구조화', body: '인식된 텍스트를 이름, 날짜, 장소, 금액 등 의미 단위로 자동 정리합니다.' },
+    { icon: FolderTree, iconBg: '#FFEDD5', iconFg: '#9A3412', title: '자동 카테고리 분류', body: '문서 유형을 분석해 명함·티켓·영수증·포스터 카테고리로 자동 저장합니다.' },
+    { icon: Search, iconBg: '#FEE2E2', iconFg: '#B91C1C', title: '자연어 통합 검색', body: '정확한 파일명을 몰라도 기억나는 표현만으로 원하는 기록을 찾을 수 있습니다.' },
+    { icon: CalendarCheck2, iconBg: '#FEF3C7', iconFg: '#B45309', title: '캘린더 연동', body: '일정 정보는 Google Calendar와 연동해 놓치지 않도록 관리할 수 있습니다.' },
   ]
   return (
-    <section style={{ padding: '96px 24px', background: '#FFFFFF' }}>
+    <section id="features" style={{ padding: '96px 24px', background: '#FFFFFF' }}>
       <SectionHead
         eyebrow="Features"
-        title="필요한 것만, 깔끔하게"
-        subtitle="복잡한 노트 앱도, 화려한 OCR 데모도 아닌, 정확하게 한 가지 — 흩어진 종이를 검색 가능한 데이터로 바꿉니다."
+        title="쌓이는 기록을, 쓰기 쉬운 정보로"
+        subtitle="업로드부터 인식, 분류, 검색, 연동까지. 이미지 속 정보를 활용 가능한 데이터로 전환합니다."
       />
       <div
         style={{
@@ -558,30 +575,34 @@ function FeatureGrid() {
           gap: 20,
         }}
       >
-        {features.map(f => (
-          <article
-            key={f.title}
-            style={{
-              padding: 28,
-              background: '#FFFFFF',
-              border: `1px solid ${C.border}`,
-              borderRadius: 16,
-            }}
-          >
-            <div
+        {features.map(f => {
+          const Icon = f.icon
+
+          return (
+            <article
+              key={f.title}
               style={{
-                width: 44, height: 44, borderRadius: 12,
-                background: f.iconBg, color: f.iconFg,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 20, marginBottom: 16,
+                padding: 28,
+                background: '#FFFFFF',
+                border: `1px solid ${C.border}`,
+                borderRadius: 16,
               }}
             >
-              {f.icon}
-            </div>
-            <h3 style={{ fontSize: 17, fontWeight: 700, color: C.navy, marginBottom: 8 }}>{f.title}</h3>
-            <p style={{ fontSize: 13, lineHeight: 1.6, color: C.mute }}>{f.body}</p>
-          </article>
-        ))}
+              <div
+                style={{
+                  width: 44, height: 44, borderRadius: 12,
+                  background: f.iconBg, color: f.iconFg,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginBottom: 16,
+                }}
+              >
+                <Icon size={20} strokeWidth={2.2} />
+              </div>
+              <h3 style={{ fontSize: 17, fontWeight: 700, color: C.navy, marginBottom: 8 }}>{f.title}</h3>
+              <p style={{ fontSize: 13, lineHeight: 1.6, color: C.mute }}>{f.body}</p>
+            </article>
+          )
+        })}
       </div>
     </section>
   )
@@ -591,16 +612,16 @@ function FeatureGrid() {
 
 function HowItWorks() {
   const steps = [
-    { n: '01', title: '사진을 올린다',   body: '드래그&드롭, 카메라, PDF 업로드. 어떤 입력이든 받습니다.' },
-    { n: '02', title: 'MORA가 읽는다',   body: 'OCR로 글자를, NER로 의미 단위(사람·날짜·금액)를 추출합니다.' },
-    { n: '03', title: '바로 검색한다',   body: '"지난주 회의에서 받은 명함"처럼 평소 말투로 찾으세요.' },
+    { n: '01', title: '사진 한 장 업로드',   body: '카메라, 앨범, PDF 업로드로 간편하게 시작하세요.' },
+    { n: '02', title: 'AI 자동 인식',   body: 'OCR과 AI 분석으로 이미지 속 핵심 정보를 추출합니다.' },
+    { n: '03', title: '일정 자동 등록',   body: '캘린더와 연동하여 손쉽게 일정을 확인할 수 있습니다.' },
   ]
   return (
     <section id="how" style={{ padding: '96px 24px', background: C.surface }}>
       <SectionHead
         eyebrow="How it works"
-        title="찍고 → 인식 → 검색"
-        subtitle="3단계면 끝. 폴더 만들 필요도, 태그 달 필요도 없습니다."
+        title="찍고 → 정리하고 → 바로 찾기"
+        subtitle="복잡한 입력 없이 사진만 업로드하세요. MORA가 기록을 검색 가능한 정보로 바꿔드립니다."
       />
       <div
         style={{
@@ -643,40 +664,62 @@ function HowItWorks() {
 
 function UseCases() {
   const cases = [
-    { emoji: '💼', label: '명함',   desc: '회의·전시·미팅 후 받은 명함을 사진 한 장으로 연락처에 저장.' },
-    { emoji: '🎟', label: '티켓',   desc: 'KTX·공연·항공 티켓의 출발 시간, 좌석을 자동으로 캘린더에 등록.' },
-    { emoji: '🧾', label: '영수증', desc: '카페·식비·교통비를 자동으로 가계부 항목으로 정리.' },
-    { emoji: '📌', label: '포스터', desc: '관심 있는 전시·공연 포스터를 보관하고 마감일을 알림으로.' },
+    { icon: '/icons/business_card.png', label: '명함',   desc: '회의나 미팅 후 받은 명함을 사진 한 장으로 간편하게 저장해보세요.' },
+    { icon: '/icons/ticket.png', label: '티켓',   desc: '공연·영화·전시 티켓의 날짜와 장소를 쉽게 기록할 수 있어요.' },
+    { icon: '/icons/receipt.png', label: '영수증', desc: '카페, 식비, 교통비 등 영수증 속 정보를 자동으로 정리해보세요.' },
+    { icon: '/icons/poster.png', label: '포스터', desc: '전시, 공연, 행사 포스터를 저장하고 마감일을 놓치지 마세요.' },
   ]
   return (
     <section style={{ padding: '96px 24px', background: '#FFFFFF' }}>
       <SectionHead
         eyebrow="Use cases"
-        title="이런 종이, 매일 마주치죠"
-        subtitle="MORA는 일상에서 흔히 나오는 4가지 종류를 깊이 있게 다룹니다."
+        title="이런 종이들, 매일 마주치고 있죠."
+        subtitle="MORA는 일상에서 자주 만나는 종이 기록들을 더 쉽게 보관하고 관리합니다."
       />
       <div
         style={{
           maxWidth: 1100,
           margin: '48px auto 0',
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: 16,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 14,
         }}
       >
         {cases.map(c => (
           <article
             key={c.label}
             style={{
-              padding: 24,
+              padding: '20px 18px 18px',
               background: C.surface,
               border: `1px solid ${C.border}`,
               borderRadius: 14,
+              minHeight: 140,
             }}
           >
-            <p style={{ fontSize: 32, marginBottom: 10 }}>{c.emoji}</p>
-            <h3 style={{ fontSize: 16, fontWeight: 700, color: C.navy, marginBottom: 6 }}>{c.label}</h3>
-            <p style={{ fontSize: 12, lineHeight: 1.6, color: C.mute }}>{c.desc}</p>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
+                marginBottom: 12,
+              }}
+            >
+              <h3 style={{ fontSize: 24, fontWeight: 800, color: C.navy, lineHeight: 1 }}>{c.label}</h3>
+              <div
+                
+              >
+                <Image 
+                src={c.icon} 
+                alt={`${c.label} 아이콘`} 
+                width={80} 
+                height={80} 
+                style={{
+                  filter: 'drop-shadow(0 8px 14px rgba(59, 130, 246, 0.22))',
+                }} />
+              </div>
+            </div>
+            <p style={{ fontSize: 12, lineHeight: 1.7, color: C.mute }}>{c.desc}</p>
           </article>
         ))}
       </div>
@@ -748,7 +791,7 @@ function SectionHead({ eyebrow, title, subtitle }: { eyebrow: string; title: str
     <div style={{ maxWidth: 720, margin: '0 auto', textAlign: 'center' }}>
       <span
         style={{
-          fontSize: 12, fontWeight: 700, letterSpacing: '0.1em',
+          fontSize: 16, fontWeight: 700, letterSpacing: '0.1em',
           textTransform: 'uppercase', color: C.primary,
         }}
       >
@@ -803,26 +846,26 @@ function ScrollPinnedShowcase() {
   const steps: ScrollStep[] = [
     {
       eyebrow: 'STEP 01',
-      title: '사진 한 장 올린다',
-      body: '카메라, 드래그&드롭, PDF — 어떤 입력이든 받습니다. 명함이든 영수증이든 그대로 던져주세요.',
+      title: '그냥 올리기만 하세요',
+      body: '카메라 촬영, 앨범 선택, 드래그&드롭까지. 어떤 방식이든 사진만 올리면 MORA가 알아서 분석합니다.',
       render: () => <UploadScreen />,
     },
     {
       eyebrow: 'STEP 02',
-      title: 'MORA가 읽는다',
-      body: 'OCR이 글자를, NER이 의미 단위(사람·날짜·금액·장소)를 동시에 추출합니다. 평균 2초.',
+      title: 'MORA가 읽고 분석합니다',
+      body: 'OCR이 이미지 속 글자를 읽고, AI가 사람·날짜·금액·장소 같은 핵심 정보를 자동으로 추출합니다.',
       render: () => <ParseScreen />,
     },
     {
       eyebrow: 'STEP 03',
-      title: '카테고리로 자동 분류',
-      body: '명함은 연락처로, 티켓은 캘린더로, 영수증은 가계부로 — 손대지 않아도 알아서 흘러갑니다.',
+      title: '유형별로 알아서 정리됩니다',
+      body: '명함은 연락처로, 티켓 및 포스터는 캘린더로, 영수증은 가계부로 자동 분류해 보관함에 정리합니다.',
       render: () => <ListScreen />,
     },
     {
       eyebrow: 'STEP 04',
-      title: '검색·요약은 자연어로',
-      body: '"3월 부산 출장 영수증"처럼 평소 말투로 찾으세요. 카테고리 통합 검색 + AI 요약 제공.',
+      title: '말하듯 검색하고, 한눈에 요약하세요',
+      body: '“3월 부산 출장 영수증”처럼 자연어로 검색하면, 관련 기록을 찾아 핵심 내용까지 AI가 정리해줍니다.',
       render: () => <LedgerScreen />,
     },
   ]
@@ -858,7 +901,7 @@ function ScrollPinnedShowcase() {
             >
               <span
                 style={{
-                  fontSize: 12, fontWeight: 700, letterSpacing: '0.14em',
+                  fontSize: 18, fontWeight: 700, letterSpacing: '0.14em',
                   textTransform: 'uppercase', color: C.primary,
                 }}
               >
@@ -991,7 +1034,7 @@ function PhoneShell({ children }: { children: React.ReactNode }) {
           }}
         >
           <span>9:41</span>
-          <span style={{ fontSize: 11 }}>5G ●●●●</span>
+          <span style={{ fontSize: 11 }}>5G</span>
         </div>
         {children}
       </div>
@@ -1264,11 +1307,6 @@ function Footer() {
           <p style={{ fontSize: 11, marginTop: 4 }}>OCR-driven document organizer · 2026</p>
         </div>
         <div style={{ display: 'flex', gap: 18, fontSize: 12 }}>
-          <Link href="/login"  style={{ color: C.mute, textDecoration: 'none' }}>로그인</Link>
-          <Link href="/login" style={{ color: C.mute, textDecoration: 'none' }}>시작하기</Link>
-          <a href="https://github.com/lavermeanyou/Mora" target="_blank" rel="noreferrer" style={{ color: C.mute, textDecoration: 'none' }}>
-            GitHub
-          </a>
         </div>
       </div>
     </footer>
