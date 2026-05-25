@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMyTickets, deleteTicket } from '@/lib/api'
+import { getMyTickets, deleteTicket, updateTicket } from '@/lib/api'
 import type { TicketResponse } from '@/types'
 
 const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -31,6 +31,53 @@ export default function StorageTicketsPage() {
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [selectedBlockIdx, setSelectedBlockIdx] = useState<number | null>(null)
   const imgRef = useRef<HTMLDivElement>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editDraft, setEditDraft] = useState<TicketResponse | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  type TKey = 'transportType' | 'departureLocation' | 'departureDate' | 'departureTime' | 'arrivalLocation' | 'arrivalDate' | 'arrivalTime'
+  const EDITABLE_KEYS: TKey[] = ['transportType', 'departureLocation', 'departureDate', 'departureTime', 'arrivalLocation', 'arrivalDate', 'arrivalTime']
+
+  function openDrawer(t: TicketResponse | null) {
+    setSelectedTicket(t)
+    setSelectedBlockIdx(null)
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  function startEdit() {
+    if (!selectedTicket) return
+    setEditDraft({ ...selectedTicket })
+    setIsEditing(true)
+    setEditError(null)
+  }
+
+  function cancelEdit() {
+    setIsEditing(false)
+    setEditDraft(null)
+    setEditError(null)
+  }
+
+  async function saveEdit() {
+    if (!editDraft?.id) return
+    setIsSaving(true)
+    setEditError(null)
+    const body: Record<string, unknown> = {}
+    for (const k of EDITABLE_KEYS) body[k] = editDraft[k]
+    const res = await updateTicket(editDraft.id, body)
+    setIsSaving(false)
+    if (!res.success) {
+      setEditError(res.error || '수정 실패')
+      return
+    }
+    const updated = res.data!
+    setTickets(prev => prev.map(t => (t.id === updated.id ? updated : t)))
+    setSelectedTicket(updated)
+    setIsEditing(false)
+    setEditDraft(null)
+  }
 
   useEffect(() => {
     async function load() {
@@ -46,7 +93,7 @@ export default function StorageTicketsPage() {
     const res = await deleteTicket(id)
     if (res.success) {
       setTickets(prev => prev.filter(t => t.id !== id))
-      if (selectedTicket?.id === id) setSelectedTicket(null)
+      if (selectedTicket?.id === id) openDrawer(null)
     }
     setDeleteTargetId(null)
   }
@@ -110,7 +157,7 @@ export default function StorageTicketsPage() {
             return (
               <div
                 key={t.id}
-                onClick={() => { setSelectedTicket(selectedTicket?.id === t.id ? null : t); setSelectedBlockIdx(null) }}
+                onClick={() => openDrawer(selectedTicket?.id === t.id ? null : t)}
                 style={{
                   display: 'grid', gridTemplateColumns: '80px 1fr 1fr 1fr 1fr auto',
                   alignItems: 'center', gap: 16,
@@ -181,20 +228,43 @@ export default function StorageTicketsPage() {
 
       {/* 상세 서랍 */}
       {selectedTicket && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 100, display: 'flex', justifyContent: 'flex-end' }}>
-          <div onClick={() => { setSelectedTicket(null); setSelectedBlockIdx(null) }} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} />
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', justifyContent: 'flex-end' }}>
+          <div onClick={() => openDrawer(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.3)' }} />
           <div style={{
             position: 'relative', width: 440, height: '100%', background: '#FFF',
             borderLeft: '1px solid #CBD5E1', padding: 28, overflowY: 'auto',
             boxShadow: '-4px 0 24px rgba(0,0,0,0.08)',
+            display: 'flex', flexDirection: 'column', gap: 20,
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>티켓 상세</h2>
-              <button onClick={() => { setSelectedTicket(null); setSelectedBlockIdx(null) }} style={{
-                width: 32, height: 32, borderRadius: '50%', border: '1px solid #CBD5E1',
-                background: '#FFF', cursor: 'pointer', fontSize: 14, color: '#999',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>✕</button>
+            <div style={{
+              position: 'sticky', top: -28, marginTop: -28, marginLeft: -28, marginRight: -28,
+              background: '#FFFFFF', padding: '20px 28px',
+              borderBottom: '1px solid #F1F5F9', zIndex: 1,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: '#15293D' }}>
+                  {isEditing ? '티켓 수정' : '티켓 상세'}
+                </h2>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {!isEditing && (
+                    <button onClick={startEdit} style={{
+                      padding: '7px 14px', borderRadius: 6, border: 'none',
+                      background: '#0077B6', color: '#FFF',
+                      fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                    }}>수정</button>
+                  )}
+                  <button
+                    onClick={() => openDrawer(null)}
+                    title="닫기"
+                    style={{
+                      width: 32, height: 32, borderRadius: '50%',
+                      border: '1px solid #CBD5E1', background: '#FFF',
+                      cursor: 'pointer', fontSize: 14, color: '#999',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    }}
+                  >✕</button>
+                </div>
+              </div>
             </div>
 
             {/* 이미지 + bbox overlay */}
@@ -214,20 +284,75 @@ export default function StorageTicketsPage() {
             })()}
 
             {/* 필드 */}
-            {[
-              { label: '교통수단', value: selectedTicket.transportType },
-              { label: '출발지', value: selectedTicket.departureLocation },
-              { label: '출발일', value: selectedTicket.departureDate },
-              { label: '출발 시간', value: selectedTicket.departureTime },
-              { label: '도착지', value: selectedTicket.arrivalLocation },
-              { label: '도착일', value: selectedTicket.arrivalDate },
-              { label: '도착 시간', value: selectedTicket.arrivalTime },
-            ].map(f => (
-              <div key={f.label} style={{ padding: '12px 0', borderBottom: '1px solid #F1F5F9' }}>
-                <p style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{f.label}</p>
-                <p style={{ fontSize: 14, color: '#333' }}>{f.value || '-'}</p>
-              </div>
-            ))}
+            {(() => {
+              const view = isEditing && editDraft ? editDraft : selectedTicket
+              const fields: Array<{ key: TKey; label: string }> = [
+                { key: 'transportType', label: '교통수단' },
+                { key: 'departureLocation', label: '출발지' },
+                { key: 'departureDate', label: '출발일' },
+                { key: 'departureTime', label: '출발 시간' },
+                { key: 'arrivalLocation', label: '도착지' },
+                { key: 'arrivalDate', label: '도착일' },
+                { key: 'arrivalTime', label: '도착 시간' },
+              ]
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: isEditing ? 14 : 0 }}>
+                  {fields.map(f => {
+                    const raw = view[f.key] as string | undefined
+                    return (
+                      <div key={f.label} style={{
+                        padding: isEditing ? 0 : '12px 0',
+                        borderBottom: isEditing ? 'none' : '1px solid #F1F5F9',
+                      }}>
+                        <p style={{ fontSize: 11, color: '#999', marginBottom: isEditing ? 6 : 4 }}>{f.label}</p>
+                        {isEditing ? (
+                          <input
+                            value={raw || ''}
+                            onChange={e => setEditDraft(d => d && { ...d, [f.key]: e.target.value } as TicketResponse)}
+                            style={{
+                              width: '100%', padding: '10px 12px', borderRadius: 6,
+                              border: '1px solid #CBD5E1', background: '#FAFBFC',
+                              fontSize: 14, color: '#333', outline: 'none',
+                            }}
+                          />
+                        ) : (
+                          <p style={{ fontSize: 14, color: '#333' }}>{raw || '-'}</p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+
+            {isEditing && (
+              <>
+                {editError && <p style={{ fontSize: 12, color: '#DC2626' }}>{editError}</p>}
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                  <button
+                    onClick={cancelEdit}
+                    disabled={isSaving}
+                    style={{
+                      padding: '10px 18px', borderRadius: 6,
+                      border: '1px solid #CBD5E1', background: '#FFF',
+                      color: '#333', fontSize: 13, fontWeight: 600,
+                      cursor: isSaving ? 'not-allowed' : 'pointer',
+                    }}
+                  >취소</button>
+                  <button
+                    onClick={saveEdit}
+                    disabled={isSaving}
+                    style={{
+                      padding: '10px 18px', borderRadius: 6, border: 'none',
+                      background: '#0077B6', color: '#FFF',
+                      fontSize: 13, fontWeight: 600,
+                      cursor: isSaving ? 'not-allowed' : 'pointer',
+                      opacity: isSaving ? 0.6 : 1,
+                    }}
+                  >{isSaving ? '저장 중...' : '저장'}</button>
+                </div>
+              </>
+            )}
 
             {/* Raw OCR 블록 — 클릭 시 bbox */}
             {(() => {

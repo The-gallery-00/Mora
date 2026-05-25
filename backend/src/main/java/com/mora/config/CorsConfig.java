@@ -17,7 +17,7 @@ public class CorsConfig {
         // 모든 Origin 패턴을 허용 (프론트엔드 개발 서버 포함)
         config.setAllowedOriginPatterns(List.of("*"));
         // GET, POST, PUT, DELETE, OPTIONS(Preflight) 메서드 허용
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         // 모든 요청 헤더 허용 (Authorization, Content-Type 등)
         config.setAllowedHeaders(List.of("*"));
         // 쿠키·인증 헤더를 포함한 요청을 허용

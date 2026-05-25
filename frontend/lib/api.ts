@@ -246,6 +246,42 @@ export async function deletePoster(posterId: string): Promise<ApiResponse<void>>
   }
 }
 
+/** 티켓 수정 */
+export async function updateTicket(ticketId: string, body: Record<string, unknown>): Promise<ApiResponse<TicketResponse>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/tickets/${ticketId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || '수정 실패' }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 포스터 수정 */
+export async function updatePoster(posterId: string, body: Record<string, unknown>): Promise<ApiResponse<PosterResponse>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/posters/${posterId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || '수정 실패' }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
 /** 내 티켓 목록 조회 */
 export async function getMyTickets(page = 0, size = 20): Promise<ApiResponse<TicketResponse[]>> {
   try {
