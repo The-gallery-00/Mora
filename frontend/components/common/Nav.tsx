@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore, MouseEvent } from 'react'
 import Link from 'next/link'
 
 function readIsLoggedIn() {
@@ -36,6 +36,13 @@ export default function Nav() {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  const handleLogoClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (window.location.pathname === '/') {
+      e.preventDefault()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+
   return (
     <nav
       style={{
@@ -50,43 +57,25 @@ export default function Nav() {
         borderBottom: scrolled ? '1px solid rgba(255,255,255,0.05)' : 'none',
       }}
     >
-      <div
-        style={{
-          maxWidth: 1280,
-          margin: '0 auto',
-          height: 80,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 24px',
-        }}
-      >
-        <Link
-          href="/"
-          style={{
-            fontFamily: 'var(--font-logo)',
-            fontSize: 24,
-            color: '#FF8A3D',
-            textDecoration: 'none',
-            letterSpacing: 3,
-          }}
-        >
-          MORA
+      <div style={{ maxWidth: 1280, margin: '0 auto', height: 80, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
+        {/* MORA 로고 */}
+        <Link href="/" onClick={handleLogoClick} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
+          <img
+            src="/icons/mora-logo-lg.svg"
+            alt="MORA"
+            width={36}
+            height={36}
+            style={{ filter: scrolled ? 'brightness(0) invert(1)' : 'none' }}
+          />
+          <span style={{ fontFamily: 'var(--font-logo)', fontSize: 24, color: scrolled ? 'white' : '#15293D', letterSpacing: 3 }}>
+            MORA
+          </span>
         </Link>
 
+        {/* 앵커 링크 — 페이지 내 섹션으로 스크롤 이동 */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <a
-            href="#how"
-            style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }}
-          >
-            사용법
-          </a>
-          <a
-            href="#feature"
-            style={{ fontSize: 14, color: 'rgba(255,255,255,0.5)', textDecoration: 'none' }}
-          >
-            기능
-          </a>
+          <a href="#how" style={{ fontSize: 14, color: 'rgba(255, 255, 255, 0.7)', textDecoration: 'none' }}>사용법</a>
+          <a href="#features" style={{ fontSize: 14, color: 'rgba(255,255,255,0.7)', textDecoration: 'none' }}>기능</a>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -96,10 +85,10 @@ export default function Nav() {
               style={{
                 padding: '10px 20px',
                 borderRadius: 10,
-                background: '#FF8A3D',
+                background: scrolled ? 'white' :'#15293D',
                 fontSize: 14,
                 fontWeight: 600,
-                color: 'white',
+                color: scrolled ? '#15293D' : 'white',
                 textDecoration: 'none',
               }}
             >
@@ -112,28 +101,14 @@ export default function Nav() {
                 style={{
                   padding: '10px 20px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.15)',
+                  background: scrolled ? 'white' :'#15293D',
                   fontSize: 14,
-                  fontWeight: 500,
-                  color: 'rgba(255,255,255,0.7)',
+                  fontWeight: 600,
+                  color: scrolled ? '#15293D': 'white',
                   textDecoration: 'none',
                 }}
               >
                 로그인
-              </Link>
-              <Link
-                href="/login"
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: 10,
-                  background: '#FF8A3D',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: 'white',
-                  textDecoration: 'none',
-                }}
-              >
-                시작하기
               </Link>
             </>
           )}
