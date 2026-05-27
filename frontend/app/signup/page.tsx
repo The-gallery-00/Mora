@@ -4,42 +4,38 @@
 // SignupPage (/signup)
 // ----------------------------------------------------------------------------
 // 역할:
-// - 회원가입 화면을 렌더링하고 /auth/signup API를 호출한다.
-// - 회원가입 성공 시 반환된 토큰으로 즉시 로그인 상태를 구성한다.
+// - 이메일/비밀번호 회원가입 요청을 처리한다.
+// - 회원가입 성공 시 세션 정보를 localStorage에 저장하고 대시보드로 이동한다.
 //
-// 동작 흐름:
-// 1) AuthForm에서 이메일/비밀번호 입력
-// 2) handleSubmit에서 /auth/signup 호출 (name은 이메일 앞부분으로 기본값 생성)
-// 3) 응답에서 token 추출 후 localStorage 저장
-// 4) /dashboard로 이동
-//
-// 참고:
-// - 로그인 페이지와 동일한 UI 컴포넌트를 재사용하고,
-//   API 엔드포인트/문구만 signup 모드로 달라진다.
+// 화면 구성:
+// - 왼쪽: Hero(로고/이미지)
+// - 오른쪽: AuthForm(입력 폼)
+// - 좌/우 영역은 absolute로 분리해 서로 위치 영향을 주지 않도록 고정
 // ============================================================================
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { AuthForm } from '@/components/shared/AuthForm'
 import { Hero } from '@/components/shared/Hero'
 
-// 인증 API 기본 주소 (환경변수 미설정 시 로컬 Spring 서버 사용)
+// 인증 API 기본 주소(환경변수가 없으면 로컬 백엔드 사용)
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 
 export default function SignupPage() {
-  // 회원가입 입력 상태
+  // 폼 상태
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
+  // 이미 로그인된 경우 대시보드로 리다이렉트
   useEffect(() => {
     if (localStorage.getItem('mora_token')) {
       router.replace('/dashboard')
     }
   }, [router])
 
-  // 회원가입 요청 후 즉시 로그인 상태로 전환(토큰 저장)
+  // 회원가입 요청 처리
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
@@ -58,7 +54,7 @@ export default function SignupPage() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok) {
-        // 백엔드 표준 에러 포맷(data.error / data.data.error) 모두 대응
+        // 백엔드 에러 포맷(data.error / data.data.error) 모두 대응
         setError(data.error || data.data?.error || '회원가입에 실패했습니다')
         return
       }
@@ -71,7 +67,7 @@ export default function SignupPage() {
         return
       }
 
-      // 대시보드 레이아웃에서 사용 중인 키 이름과 동일하게 저장
+      // 전역 세션 상태에서 사용하는 키로 저장
       localStorage.setItem('mora_token', token)
       localStorage.setItem(
         'mora_user',
@@ -85,7 +81,7 @@ export default function SignupPage() {
 
       router.replace('/dashboard')
     } catch {
-      setError('서버에 연결할 수 없습니다')
+      setError('서버와 연결할 수 없습니다')
     } finally {
       setLoading(false)
     }
@@ -93,21 +89,24 @@ export default function SignupPage() {
 
   return (
     <div className="bg-white relative min-h-screen">
-      {/* 원본 디자인 기준: 중앙 고정 2열(브랜딩 + 인증 폼) 레이아웃 */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex gap-[141px] items-start">
-        <Hero />
-        <AuthForm
-          mode="signup"
-          email={email}
-          password={password}
-          loading={loading}
-          error={error}
-          apiBase={API}
-          onEmailChange={(event) => setEmail(event.target.value)}
-          onPasswordChange={(event) => setPassword(event.target.value)}
-          onLinkClick={() => router.push('/login')}
-          onSubmit={handleSubmit}
-        />
+      <div className="absolute left-1/2 top-1/2 h-[560px] w-[880px] -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute left-0 top-0">
+          <Hero />
+        </div>
+        <div className="absolute right-0 top-0">
+          <AuthForm
+            mode="signup"
+            email={email}
+            password={password}
+            loading={loading}
+            error={error}
+            apiBase={API}
+            onEmailChange={(event) => setEmail(event.target.value)}
+            onPasswordChange={(event) => setPassword(event.target.value)}
+            onLinkClick={() => router.push('/login')}
+            onSubmit={handleSubmit}
+          />
+        </div>
       </div>
     </div>
   )
