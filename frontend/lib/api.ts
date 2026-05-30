@@ -367,6 +367,51 @@ export async function changePassword(current: string, next: string): Promise<Api
   }
 }
 
+/** Google Calendar 연동 상태 조회 */
+export async function getGoogleCalendarConnected(userId: string): Promise<ApiResponse<{ userId: string; connected: boolean }>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/google-calendar/connected/${userId}`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** Google Calendar OAuth 시작 URL 조회 */
+export async function getGoogleCalendarConnectUrl(): Promise<ApiResponse<{ url: string }>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/google-calendar/connect-url`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `연동 URL 조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** Google Calendar 연동 해제 */
+export async function disconnectGoogleCalendar(userId: string): Promise<ApiResponse<{ userId: string; connected: boolean }>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/google-calendar/tokens/${userId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `연동 해제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** 키워드로 명함 검색 */
 export async function searchCards(query: string): Promise<ApiResponse<BusinessCard[]>> {
   try {

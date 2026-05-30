@@ -38,10 +38,14 @@ public class PosterService {
 
     private final PosterRepository posterRepository;
     private final EmbeddingService embeddingService;
+    private final GoogleCalendarService googleCalendarService;
 
-    public PosterService(PosterRepository posterRepository, EmbeddingService embeddingService) {
+    public PosterService(PosterRepository posterRepository,
+                         EmbeddingService embeddingService,
+                         GoogleCalendarService googleCalendarService) {
         this.posterRepository = posterRepository;
         this.embeddingService = embeddingService;
+        this.googleCalendarService = googleCalendarService;
     }
 
     public ServiceResult<PosterResponse> save(UUID userId, PosterRequest request) {
@@ -67,9 +71,12 @@ public class PosterService {
         poster.setRawJson(request.getRawJson());
         poster.setEmbedding(embedding);
 
-        PosterResponse response = PosterResponse.from(posterRepository.save(poster));
+        poster = posterRepository.save(poster);
+        PosterResponse response = PosterResponse.from(poster);
+        String calendarMessage = syncGoogleCalendar(userId, poster);
 
-        if (embedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        String message = combineMessages(embedding == null ? EMBEDDING_FAIL_MSG : null, calendarMessage);
+        if (message != null) return ServiceResult.withMessage(response, message);
         return ServiceResult.ok(response);
     }
 
@@ -114,9 +121,12 @@ public class PosterService {
             embeddingAttempted = true;
         }
 
-        PosterResponse response = PosterResponse.from(posterRepository.save(poster));
+        poster = posterRepository.save(poster);
+        PosterResponse response = PosterResponse.from(poster);
+        String calendarMessage = syncGoogleCalendar(userId, poster);
 
-        if (embeddingAttempted && newEmbedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        String message = combineMessages(embeddingAttempted && newEmbedding == null ? EMBEDDING_FAIL_MSG : null, calendarMessage);
+        if (message != null) return ServiceResult.withMessage(response, message);
         return ServiceResult.ok(response);
     }
 
@@ -226,6 +236,23 @@ public class PosterService {
     private String joinRawText(List<String> rawTextList) {
         if (rawTextList == null || rawTextList.isEmpty()) return "";
         return String.join(" ", rawTextList);
+    }
+
+    private String syncGoogleCalendar(UUID userId, Poster poster) {
+        try {
+            googleCalendarService.syncPosterEvent(userId, poster);
+            return null;
+        } catch (RuntimeException e) {
+            return "구글 캘린더 동기화 실패: " + e.getMessage();
+        }
+    }
+
+    private String combineMessages(String... messages) {
+        return Arrays.stream(messages)
+                .filter(Objects::nonNull)
+                .filter(message -> !message.isBlank())
+                .reduce((left, right) -> left + " " + right)
+                .orElse(null);
     }
 
     private PosterResponse mapRowToPosterResponse(Map<String, Object> row) {

@@ -2,11 +2,19 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { changeName as apiChangeName, changePassword as apiChangePassword, getMe } from '@/lib/api'
+import {
+  changeName as apiChangeName,
+  changePassword as apiChangePassword,
+  disconnectGoogleCalendar,
+  getGoogleCalendarConnected,
+  getGoogleCalendarConnectUrl,
+  getMe,
+} from '@/lib/api'
 
 const CompactCtx = createContext(false)
 
 interface StoredUser {
+  id?: string
   name?: string
   email?: string
   avatar?: string       // base64 dataURL
@@ -36,7 +44,7 @@ interface Prefs {
 
 const DEFAULT_PREFS: Prefs = {
   toggles: {
-    gcal: true,
+    gcal: false,
     contacts: false,
     compact: false,
     notifOcr: true,
@@ -104,20 +112,42 @@ export default function SettingsPage() {
   const [joinedAt] = useState('2025. 11. 03.')
   // 소셜 전용 계정에서는 비밀번호 변경을 차단해야 하므로 provider를 별도로 추적한다.
   const [provider, setProvider] = useState<string>(() => loadStoredUser().provider || 'local')
+  const [userId, setUserId] = useState<string>(() => loadStoredUser().id || '')
+  const [calendarBusy, setCalendarBusy] = useState(false)
   const isLocalAccount = provider === 'local'
 
   // 마운트 시 /auth/me를 호출해 최신 provider/name을 동기화한다.
   // localStorage 값이 오래됐거나 OAuth 콜백 시 provider가 빠진 경우를 보정한다.
   useEffect(() => {
     let cancelled = false
-    getMe().then(res => {
+    getMe().then(async res => {
       if (cancelled || !res.success) return
       const me = res.data
+      if (me.id) setUserId(me.id)
       if (me.provider) setProvider(me.provider)
       if (me.name) setNickname(me.name)
-      saveStoredUser({ name: me.name, email: me.email, provider: me.provider })
+      saveStoredUser({ id: me.id, name: me.name, email: me.email, provider: me.provider })
+
+      if (me.id) {
+        const connectedRes = await getGoogleCalendarConnected(me.id)
+        if (!cancelled && connectedRes.success) {
+          setToggles(prev => ({ ...prev, gcal: connectedRes.data.connected }))
+        }
+      }
     })
     return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    const calendar = params.get('calendar')
+    if (calendar === 'connected') {
+      setToggles(prev => ({ ...prev, gcal: true }))
+    }
+    if (calendar === 'failed') {
+      alert(params.get('message') || '구글 캘린더 연동에 실패했습니다.')
+    }
   }, [])
   // TODO: replace stats with selector on real data once /me/stats endpoint ships
   const stats = useMemo(
@@ -188,6 +218,40 @@ export default function SettingsPage() {
 
   function flip(k: ToggleKey) {
     setToggles(prev => ({ ...prev, [k]: !prev[k] }))
+  }
+
+  async function handleGoogleCalendarToggle() {
+    if (calendarBusy) return
+    if (!userId) {
+      alert('로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.')
+      return
+    }
+
+    setCalendarBusy(true)
+    try {
+      if (toggles.gcal) {
+        const res = await disconnectGoogleCalendar(userId)
+        if (!res.success) {
+          alert(res.error || '구글 캘린더 연동 해제에 실패했습니다.')
+          return
+        }
+        setToggles(prev => ({ ...prev, gcal: false }))
+        return
+      }
+
+      const res = await getGoogleCalendarConnectUrl()
+      if (!res.success) {
+        alert(res.error || '구글 캘린더 연동 URL을 가져오지 못했습니다.')
+        return
+      }
+      if (!res.data.url) {
+        alert('구글 캘린더 연동 URL을 가져오지 못했습니다.')
+        return
+      }
+      window.location.href = res.data.url
+    } finally {
+      setCalendarBusy(false)
+    }
   }
 
   // TODO: wire to /auth/logout endpoint
@@ -279,7 +343,7 @@ export default function SettingsPage() {
               right={
                 <RightGroup>
                   <Pill label={toggles.gcal ? '연동됨' : '미연동'} on={toggles.gcal} />
-                  <Toggle on={toggles.gcal} onClick={() => flip('gcal')} />
+                  <Toggle on={toggles.gcal} onClick={handleGoogleCalendarToggle} disabled={calendarBusy} />
                 </RightGroup>
               }
             />
@@ -660,17 +724,19 @@ function Pill({ label, on }: { label: string; on: boolean }) {
   )
 }
 
-function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
+function Toggle({ on, onClick, disabled = false }: { on: boolean; onClick: () => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       role="switch"
       aria-checked={on}
       style={{
         width: 40, height: 22, borderRadius: 999, border: 'none',
         background: on ? C.primary : C.border,
-        position: 'relative', cursor: 'pointer', transition: 'background 0.15s',
+        position: 'relative', cursor: disabled ? 'wait' : 'pointer', transition: 'background 0.15s',
+        opacity: disabled ? 0.6 : 1,
         padding: 0, flexShrink: 0,
       }}
     >
