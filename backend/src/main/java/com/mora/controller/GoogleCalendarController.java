@@ -12,6 +12,7 @@ import com.mora.security.JwtUtil;
 import com.mora.service.AuthService;
 import com.mora.service.GoogleCalendarService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -23,7 +24,9 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.util.UUID;
 
 @Tag(name = "구글 캘린더", description = "구글 캘린더 연동 API")
@@ -35,6 +38,9 @@ public class GoogleCalendarController {
     private final GoogleCalendarService googleCalendarService;
     private final AuthService authService;
     private final JwtUtil jwtUtil;
+
+    @Value("${app.frontend-url}")
+    private String frontendUrl;
 
     @GetMapping("/connect-url")
     public ResponseEntity<ApiResponse<GoogleCalendarConnectUrlResponse>> getConnectUrl(
@@ -51,7 +57,7 @@ public class GoogleCalendarController {
     }
 
     @GetMapping("/callback")
-    public ResponseEntity<ApiResponse<GoogleCalendarTokenResponse>> callback(
+    public ResponseEntity<?> callback(
             @RequestParam(required = false) String code,
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String error
@@ -61,9 +67,13 @@ public class GoogleCalendarController {
                 throw new RuntimeException("구글 캘린더 연동이 취소되었습니다.");
             }
             GoogleCalendarToken token = googleCalendarService.connectByCode(code, state);
-            return ResponseEntity.ok(ApiResponse.ok(GoogleCalendarTokenResponse.from(token)));
+            return ResponseEntity.status(302)
+                    .location(settingsRedirectUri("connected", token.getGoogleEmail()))
+                    .build();
         } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+            return ResponseEntity.status(302)
+                    .location(settingsRedirectUri("failed", e.getMessage()))
+                    .build();
         }
     }
 
@@ -139,5 +149,18 @@ public class GoogleCalendarController {
             throw new RuntimeException("로그인 토큰이 올바르지 않습니다.");
         }
         return jwtUtil.getUserId(token);
+    }
+
+    private URI settingsRedirectUri(String status, String message) {
+        String baseUrl = frontendUrl == null || frontendUrl.isBlank()
+                ? "http://localhost:3000"
+                : frontendUrl.replaceAll("/+$", "");
+        return UriComponentsBuilder.fromHttpUrl(baseUrl)
+                .path("/dashboard/settings")
+                .queryParam("calendar", status)
+                .queryParam("message", message == null ? "" : message)
+                .build()
+                .encode()
+                .toUri();
     }
 }

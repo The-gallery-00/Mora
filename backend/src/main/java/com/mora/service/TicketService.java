@@ -46,10 +46,14 @@ public class TicketService {
 
     private final TicketRepository ticketRepository;
     private final EmbeddingService embeddingService;
+    private final GoogleCalendarService googleCalendarService;
 
-    public TicketService(TicketRepository ticketRepository, EmbeddingService embeddingService) {
+    public TicketService(TicketRepository ticketRepository,
+                         EmbeddingService embeddingService,
+                         GoogleCalendarService googleCalendarService) {
         this.ticketRepository = ticketRepository;
         this.embeddingService = embeddingService;
+        this.googleCalendarService = googleCalendarService;
     }
 
     /**
@@ -89,8 +93,10 @@ public class TicketService {
         // DB에 저장하고 응답 DTO로 변환하여 반환
         ticket = ticketRepository.save(ticket);
         TicketResponse response = TicketResponse.from(ticket);
+        String calendarMessage = syncGoogleCalendar(userId, ticket);
 
-        if (embedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        String message = combineMessages(embedding == null ? EMBEDDING_FAIL_MSG : null, calendarMessage);
+        if (message != null) return ServiceResult.withMessage(response, message);
         return ServiceResult.ok(response);
     }
 
@@ -144,8 +150,10 @@ public class TicketService {
 
         ticket = ticketRepository.save(ticket);
         TicketResponse response = TicketResponse.from(ticket);
+        String calendarMessage = syncGoogleCalendar(userId, ticket);
 
-        if (embeddingAttempted && newEmbedding == null) return ServiceResult.withMessage(response, EMBEDDING_FAIL_MSG);
+        String message = combineMessages(embeddingAttempted && newEmbedding == null ? EMBEDDING_FAIL_MSG : null, calendarMessage);
+        if (message != null) return ServiceResult.withMessage(response, message);
         return ServiceResult.ok(response);
     }
 
@@ -314,6 +322,23 @@ public class TicketService {
     private String joinRawText(List<String> rawTextList) {
         if (rawTextList == null || rawTextList.isEmpty()) return "";
         return String.join(" ", rawTextList);
+    }
+
+    private String syncGoogleCalendar(UUID userId, Ticket ticket) {
+        try {
+            googleCalendarService.syncTicketEvent(userId, ticket);
+            return null;
+        } catch (RuntimeException e) {
+            return "구글 캘린더 동기화 실패: " + e.getMessage();
+        }
+    }
+
+    private String combineMessages(String... messages) {
+        return Arrays.stream(messages)
+                .filter(Objects::nonNull)
+                .filter(message -> !message.isBlank())
+                .reduce((left, right) -> left + " " + right)
+                .orElse(null);
     }
 
     // 네이티브 쿼리 결과(Map)를 TicketResponse DTO로 변환한다.
