@@ -61,7 +61,7 @@ export default function StorageCardsPage() {
       setIsLoading(true)
       const res = await getMyCards()
       if (res.success) {
-        setCards(res.data)
+        setCards(Array.isArray(res.data) ? res.data : [])
       }
       setIsLoading(false)
     }
@@ -86,7 +86,7 @@ export default function StorageCardsPage() {
   // 날짜별 그룹핑
   const groupedCards: Record<string, BusinessCard[]> = {}
   for (const card of sortedCards) {
-    const dateKey = card.createdAt ? card.createdAt.split('T')[0] : '날짜 없음'
+    const dateKey = typeof card.createdAt === 'string' ? card.createdAt.split('T')[0] : '날짜 없음'
     if (!groupedCards[dateKey]) groupedCards[dateKey] = []
     groupedCards[dateKey].push(card)
   }
