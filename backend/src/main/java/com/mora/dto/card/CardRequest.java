@@ -20,4 +20,5 @@ public class CardRequest {
     private String rawOcrText;
     // 명함 이미지 url
     private String imageUrl;
+    private java.util.UUID groupId;
 }

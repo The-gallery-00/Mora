@@ -42,6 +42,8 @@ public class BusinessCard {
     // 명함 이미지 URL (S3 같은 외부 저장소 경로)
     private String imageUrl;
 
+    private UUID groupId;
+
     // 임베딩 벡터
     @Column(columnDefinition = "vector(1536)")
     private String embedding;

@@ -1,4 +1,4 @@
-import type { BusinessCard, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse } from '@/types'
+import type { BusinessCard, BusinessCardGroup, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 const OCR_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -188,9 +188,13 @@ function parseMoney(value?: string): number | null {
 }
 
 /** 내 명함 목록 조회 */
-export async function getMyCards(): Promise<ApiResponse<BusinessCard[]>> {
+export async function getMyCards(options: { groupId?: string | null; ungrouped?: boolean } = {}): Promise<ApiResponse<BusinessCard[]>> {
   try {
-    const res = await fetch(`${API_BASE}/api/cards`, { headers: getAuthHeaders() })
+    const params = new URLSearchParams()
+    if (options.groupId) params.set('groupId', options.groupId)
+    if (options.ungrouped) params.set('ungrouped', 'true')
+    const query = params.toString()
+    const res = await fetch(`${API_BASE}/api/cards${query ? `?${query}` : ''}`, { headers: getAuthHeaders() })
     const json = await res.json().catch(() => null)
 
     if (!res.ok || !json?.success) {
@@ -206,6 +210,73 @@ export async function getMyCards(): Promise<ApiResponse<BusinessCard[]>> {
     return { success: true, data: rawCards.map(normalizeBusinessCard) }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 명함 그룹 목록 조회 */
+export async function getCardGroups(): Promise<ApiResponse<BusinessCardGroup[]>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/card-groups`, { headers: getAuthHeaders() })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `그룹 조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data || [] }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 명함 그룹 추가 */
+export async function createCardGroup(name: string): Promise<ApiResponse<BusinessCardGroup>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/card-groups`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ name }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `그룹 추가 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 명함 그룹 삭제. 그룹 안의 명함은 미분류로 이동된다. */
+export async function deleteCardGroup(groupId: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/card-groups/${groupId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `그룹 삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: undefined }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 명함을 그룹으로 이동. groupId가 null이면 미분류로 이동한다. */
+export async function moveCardToGroup(cardId: string, groupId: string | null): Promise<ApiResponse<BusinessCard>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/cards/${cardId}/group`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ groupId }),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `그룹 이동 실패 (${res.status})` }
+    }
+    return { success: true, data: normalizeBusinessCard(json.data) }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
   }
 }
 
