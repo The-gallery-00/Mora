@@ -367,6 +367,24 @@ export async function changePassword(current: string, next: string): Promise<Api
   }
 }
 
+/** 회원 탈퇴 */
+export async function deleteAccount(password?: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(password ? { password } : {}),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `회원 탈퇴 실패 (${res.status})` }
+    }
+    return { success: true, data: undefined }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** Google Calendar 연동 상태 조회 */
 export async function getGoogleCalendarConnected(userId: string): Promise<ApiResponse<{ userId: string; connected: boolean }>> {
   try {

@@ -5,6 +5,7 @@ import com.mora.dto.auth.AuthResponse;
 
 import com.mora.dto.auth.ChangeNameRequest;
 import com.mora.dto.auth.ChangePasswordRequest;
+import com.mora.dto.auth.DeleteAccountRequest;
 import com.mora.dto.auth.LoginRequest;
 import com.mora.dto.auth.SignupRequest;
 import com.mora.security.PasswordChangeRateLimiter;
@@ -139,6 +140,25 @@ public class AuthController {
         try {
             UUID userId = requireUserId(request);
             authService.changePassword(userId, body);
+            return ResponseEntity.ok(ApiResponse.ok(null));
+        } catch (UnauthorizedException e) {
+            return ResponseEntity.status(401).body(ApiResponse.fail(e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    /*
+     * 회원 탈퇴.
+     * 인증 토큰에서 userId를 추출해 본인 계정만 삭제한다.
+     * 로컬 계정은 서비스 계층에서 비밀번호를 검증하고, 소셜 계정은 비밀번호 없이 삭제한다.
+     */
+    @DeleteMapping("/me")
+    public ResponseEntity<ApiResponse<Void>> deleteMe(HttpServletRequest request,
+                                                      @RequestBody(required = false) DeleteAccountRequest body) {
+        try {
+            UUID userId = requireUserId(request);
+            authService.deleteAccount(userId, body);
             return ResponseEntity.ok(ApiResponse.ok(null));
         } catch (UnauthorizedException e) {
             return ResponseEntity.status(401).body(ApiResponse.fail(e.getMessage()));

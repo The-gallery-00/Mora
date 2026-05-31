@@ -3,6 +3,7 @@ package com.mora.service;
 import com.mora.dto.auth.AuthResponse;
 import com.mora.dto.auth.ChangeNameRequest;
 import com.mora.dto.auth.ChangePasswordRequest;
+import com.mora.dto.auth.DeleteAccountRequest;
 import com.mora.dto.auth.LoginRequest;
 import com.mora.dto.oauth.OAuthUserResponse;
 import com.mora.dto.auth.SignupRequest;
@@ -13,6 +14,7 @@ import com.mora.repository.UserRepository;
 import com.mora.security.JwtUtil;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
@@ -170,6 +172,27 @@ public class AuthService {
         User user = getUserById(userId);
         user.setName(trimmed);
         return userRepository.save(user);
+    }
+
+    /**
+     * 로그인된 사용자의 계정을 삭제한다.
+     * 로컬 계정은 비밀번호를 한 번 더 확인하고, 소셜 전용 계정은 JWT 인증만으로 삭제한다.
+     * 사용자와 연결된 문서/검색 기록/소셜 연동 정보는 DB의 ON DELETE CASCADE 제약으로 함께 정리된다.
+     */
+    @Transactional
+    public void deleteAccount(UUID userId, DeleteAccountRequest request) {
+        User user = getUserById(userId);
+
+        if ("local".equalsIgnoreCase(user.getProvider()) && !isBlank(user.getPasswordHash())) {
+            if (request == null || isBlank(request.getPassword())) {
+                throw new RuntimeException("비밀번호를 입력해주세요.");
+            }
+            if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+                throw new RuntimeException("비밀번호가 일치하지 않습니다.");
+            }
+        }
+
+        userRepository.delete(user);
     }
 
     private void validateSignupRequest(SignupRequest request) {

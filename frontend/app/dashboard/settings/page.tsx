@@ -7,6 +7,7 @@ import {
   changeName as apiChangeName,
   changePassword as apiChangePassword,
   clearSearchHistories,
+  deleteAccount,
   deleteMyDocuments,
   disconnectGoogleCalendar,
   getGoogleCalendarConnected,
@@ -315,6 +316,22 @@ export default function SettingsPage() {
     setModal(null)
   }
 
+  async function handleDeleteAccount(password?: string) {
+    const res = await deleteAccount(password)
+    if (!res.success) {
+      alert(res.error || '회원 탈퇴에 실패했습니다.')
+      return
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('mora_token')
+      localStorage.removeItem('mora_user')
+      localStorage.removeItem(PREFS_KEY)
+    }
+    alert('회원 탈퇴가 완료되었습니다.')
+    setModal(null)
+    router.replace('/')
+  }
+
   return (
     <div style={{ padding: '40px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
       {/* Page title */}
@@ -566,14 +583,18 @@ export default function SettingsPage() {
         <ConfirmModal
           icon="⚠"
           title="정말 탈퇴하시겠어요?"
-          description="이 작업은 되돌릴 수 없습니다. 계속하려면 계정 비밀번호를 입력하세요."
-          confirmLabel="확인 후 진행"
-          requirePassword
+          description={
+            isLocalAccount
+              ? '이 작업은 되돌릴 수 없습니다. 계속하려면 계정 비밀번호를 입력하세요.'
+              : '이 작업은 되돌릴 수 없습니다. 저장된 계정과 서비스 데이터가 삭제됩니다.'
+          }
+          confirmLabel="탈퇴"
+          requirePassword={isLocalAccount}
+          confirmText={isLocalAccount ? undefined : '탈퇴'}
+          confirmTextLabel="확인 문구"
+          confirmTextPlaceholder="탈퇴"
           onClose={() => setModal(null)}
-          onConfirm={() => {
-            // TODO: call /auth/withdraw endpoint
-            setModal(null)
-          }}
+          onConfirm={handleDeleteAccount}
         />
       )}
     </div>
@@ -1112,7 +1133,7 @@ function ConfirmModal({
   description: string
   confirmLabel: string
   onClose: () => void
-  onConfirm: () => void
+  onConfirm: (password?: string) => void
   requirePassword?: boolean
   confirmText?: string
   confirmTextLabel?: string
@@ -1164,7 +1185,7 @@ function ConfirmModal({
         confirmLabel={confirmLabel}
         confirmDisabled={!canSubmit}
         confirmTone="danger"
-        onConfirm={onConfirm}
+        onConfirm={() => onConfirm(pw)}
       />
     </ModalShell>
   )
