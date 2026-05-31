@@ -46,6 +46,7 @@ public interface PosterRepository extends JpaRepository<Poster, Integer> {
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
     );
+    void deleteByUserId(UUID userId);
 
     @Query(value = """
             SELECT p.*,

@@ -32,6 +32,7 @@ public interface TicketRepository extends JpaRepository<Ticket, Integer> {
             LocalDate startDate,
             LocalDate endDate
     );
+    void deleteByUserId(UUID userId);
 
     // 검색 대상 : 출발지, 도착지, 운송수단, 전체 OCR 텍스트
     @Query(value = """

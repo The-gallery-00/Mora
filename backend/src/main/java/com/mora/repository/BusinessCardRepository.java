@@ -25,6 +25,8 @@ public interface BusinessCardRepository extends JpaRepository<BusinessCard, UUID
 
     long countByUserId(UUID userId);
 
+    void deleteByUserId(UUID userId);
+
     //검색 대상 필드:name, company, position, phone, email, raw_ocr_text
 
     @Query(value = """

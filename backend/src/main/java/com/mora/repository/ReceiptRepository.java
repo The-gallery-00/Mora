@@ -25,6 +25,8 @@ public interface ReceiptRepository extends JpaRepository<Receipt, Integer> {
 
     long countByUserId(UUID userId);
 
+    void deleteByUserId(UUID userId);
+
     @Query(value = """
             SELECT r.*,
                 GREATEST(

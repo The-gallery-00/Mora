@@ -73,8 +73,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# PaddlePaddle OneDNN 버그 우회
+# PaddlePaddle OneDNN/PIR 버그 우회 (paddle import 전에 설정해야 적용됨).
+# 결정적 차단은 PaddleOCREngine 의 enable_mkldnn=False 이며, 아래 플래그는 보강.
 os.environ["FLAGS_use_mkldnn"] = "0"
+os.environ["FLAGS_enable_pir_api"] = "0"
+os.environ["FLAGS_enable_pir_in_executor"] = "0"
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 from fastapi import FastAPI

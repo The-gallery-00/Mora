@@ -7,6 +7,7 @@ import com.mora.dto.card.CardResponse;
 import com.mora.dto.card.CardRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.CardService;
+import com.mora.service.SearchHistoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -22,10 +23,12 @@ import java.util.UUID;
 public class CardController {
 
     private final CardService cardService;
+    private final SearchHistoryService searchHistoryService;
     private final JwtUtil jwtUtil;
 
-    public CardController(CardService cardService, JwtUtil jwtUtil) {
+    public CardController(CardService cardService, SearchHistoryService searchHistoryService, JwtUtil jwtUtil) {
         this.cardService = cardService;
+        this.searchHistoryService = searchHistoryService;
         this.jwtUtil = jwtUtil;
     }
 
@@ -146,6 +149,7 @@ public class CardController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
+            searchHistoryService.record(userId, "BUSINESS_CARD", query);
             ServiceResult<List<CardResponse>> result = cardService.hybridSearch(userId, query, topK);
             ApiResponse<List<CardResponse>> apiResponse = ApiResponse.ok(result.getData());
             if (result.hasMessage()) apiResponse.setMessage(result.getMessage());

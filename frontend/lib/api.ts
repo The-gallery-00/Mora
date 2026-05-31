@@ -315,7 +315,7 @@ export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<Pos
 }
 
 /** 내 계정 정보 조회 (provider 확인용) */
-export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string }>> {
+export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string; createdAt?: string | number[] }>> {
   try {
     const res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() })
     const json = await res.json().catch(() => null)
@@ -405,6 +405,47 @@ export async function disconnectGoogleCalendar(userId: string): Promise<ApiRespo
     const json = await res.json().catch(() => null)
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `연동 해제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 검색 기록 전체 삭제 */
+export async function clearSearchHistories(): Promise<ApiResponse<number>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/search-histories`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data || 0 }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 내가 저장한 문서 데이터 전체 삭제 */
+export async function deleteMyDocuments(): Promise<ApiResponse<{
+  deletedBusinessCards: number
+  deletedTickets: number
+  deletedPosters: number
+  deletedReceipts: number
+  deletedSearchHistories: number
+  deletedGoogleCalendarMappings: number
+}>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/me/documents`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
     }
     return { success: true, data: json.data }
   } catch {
