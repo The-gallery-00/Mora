@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -24,6 +25,13 @@ public interface TicketRepository extends JpaRepository<Ticket, Integer> {
 
     long countByUserId(UUID userId);
 
+    List<Ticket> findByUserIdAndDepartureDateOrderByDepartureTimeAsc(UUID userId, LocalDate departureDate);
+
+    List<Ticket> findByUserIdAndDepartureDateBetweenOrderByDepartureDateAscDepartureTimeAsc(
+            UUID userId,
+            LocalDate startDate,
+            LocalDate endDate
+    );
     void deleteByUserId(UUID userId);
 
     // 검색 대상 : 출발지, 도착지, 운송수단, 전체 OCR 텍스트
