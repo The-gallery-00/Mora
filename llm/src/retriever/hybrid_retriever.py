@@ -3,6 +3,7 @@
 import os
 
 import httpx
+from langsmith import traceable
 
 # 백엔드 서버 주소 (환경변수로 주입, 기본값: localhost:8080)
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8080")
@@ -17,6 +18,7 @@ SEARCH_ENDPOINTS = {
 
 
 class HybridRetriever:
+    @traceable(name="Hybrid Retriever")
     async def retrieve(
         self,
         query: str,
