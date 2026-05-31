@@ -535,14 +535,22 @@ export default function StorageCardsPage() {
 
               {selectedCard.imageUrl && (
                 <div style={{
-                  borderRadius: 12, overflow: 'hidden',
+                  borderRadius: 12,
+                  overflow: 'hidden',
                   border: '1px solid #E2E8F0',
+                  background: '#F8FAFC',
+                  flexShrink: 0,
                 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
                     alt={selectedCard.name}
-                    style={{ width: '100%', display: 'block' }}
+                    style={{
+                      width: '100%',
+                      height: 'auto',
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
                   />
                 </div>
               )}
