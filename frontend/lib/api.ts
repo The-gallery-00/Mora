@@ -171,10 +171,34 @@ export async function getMyCards(): Promise<ApiResponse<BusinessCard[]>> {
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `조회 실패 (${res.status})` }
     }
-    return { success: true, data: json.data }
+
+    const rawCards = Array.isArray(json.data)
+      ? json.data
+      : Array.isArray(json.data?.content)
+        ? json.data.content
+        : []
+
+    return { success: true, data: rawCards.map(normalizeBusinessCard) }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
+}
+
+function normalizeBusinessCard(card: BusinessCard & { createdAt?: string | number[] }): BusinessCard {
+  return {
+    ...card,
+    createdAt: normalizeDateTime(card.createdAt),
+  }
+}
+
+function normalizeDateTime(value?: string | number[]): string | undefined {
+  if (!value) return undefined
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && value.length >= 3) {
+    const [year, month, day, hour = 0, minute = 0, second = 0] = value
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`
+  }
+  return undefined
 }
 
 /** 명함 삭제 */
