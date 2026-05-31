@@ -60,9 +60,11 @@ public class Receipt {
     private String rawText;
 
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String parsedJson;
 
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String rawJson;
 
     @Column(columnDefinition = "vector(1536)")
