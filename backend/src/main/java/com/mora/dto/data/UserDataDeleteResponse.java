@@ -13,4 +13,5 @@ public class UserDataDeleteResponse {
     private long deletedReceipts;
     private long deletedSearchHistories;
     private long deletedGoogleCalendarMappings;
+    private long deletedNotifications;
 }
