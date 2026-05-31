@@ -64,6 +64,7 @@ public class Ticket {
 
     // rawText를 OpenAI text-embedding-ada-002로 임베딩한 1536차원 벡터
     @Column(columnDefinition = "vector(1536)")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::vector")
     private String embedding;
 
     @Column(updatable = false)

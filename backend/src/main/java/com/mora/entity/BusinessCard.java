@@ -46,6 +46,7 @@ public class BusinessCard {
 
     // 임베딩 벡터
     @Column(columnDefinition = "vector(1536)")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::vector")
     private String embedding;
 
     @Column(updatable = false)

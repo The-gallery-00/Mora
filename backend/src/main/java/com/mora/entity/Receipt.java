@@ -66,6 +66,7 @@ public class Receipt {
     private String rawJson;
 
     @Column(columnDefinition = "vector(1536)")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::vector")
     private String embedding;
 
     @OneToMany(mappedBy = "receipt", cascade = CascadeType.ALL, orphanRemoval = true)
