@@ -13,16 +13,32 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
 @Transactional(readOnly = true)
 public class ReceiptService {
+
+    private static final double FUZZY_THRESHOLD_START = 1.0;
+    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_STEP = 0.1;
+    private static final double FUZZY_WEIGHT = 0.6;
+    private static final double VECTOR_WEIGHT = 0.4;
+    private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
             DateTimeFormatter.ofPattern("yyyy-MM-dd"),
@@ -32,9 +48,11 @@ public class ReceiptService {
     );
 
     private final ReceiptRepository receiptRepository;
+    private final EmbeddingService embeddingService;
 
-    public ReceiptService(ReceiptRepository receiptRepository) {
+    public ReceiptService(ReceiptRepository receiptRepository, EmbeddingService embeddingService) {
         this.receiptRepository = receiptRepository;
+        this.embeddingService = embeddingService;
     }
 
     @Transactional
@@ -185,5 +203,108 @@ public class ReceiptService {
 
     private String defaultIfBlank(String value, String defaultValue) {
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    public ServiceResult<List<ReceiptResponse>> hybridSearch(UUID userId, String query, int topK) {
+        double threshold = FUZZY_THRESHOLD_START;
+        List<Map<String, Object>> fuzzyResults = Collections.emptyList();
+
+        while (fuzzyResults.size() < topK && threshold >= FUZZY_THRESHOLD_MIN) {
+            fuzzyResults = receiptRepository.fuzzySearch(userId, query, threshold, topK);
+            if (fuzzyResults.size() < topK) {
+                threshold = Math.round((threshold - FUZZY_THRESHOLD_STEP) * 10.0) / 10.0;
+            } else {
+                break;
+            }
+        }
+
+        Map<Integer, Double> fuzzyScoreMap = new HashMap<>();
+        Map<Integer, Map<String, Object>> fuzzyRowMap = new HashMap<>();
+        for (Map<String, Object> row : fuzzyResults) {
+            Integer id = ((Number) row.get("id")).intValue();
+            double score = row.get("fuzzy_score") != null ? ((Number) row.get("fuzzy_score")).doubleValue() : 0.0;
+            fuzzyScoreMap.put(id, score);
+            fuzzyRowMap.put(id, row);
+        }
+
+        Map<Integer, Double> vectorScoreMap = new HashMap<>();
+        Map<Integer, Map<String, Object>> vectorRowMap = new HashMap<>();
+        boolean embeddingFailed = false;
+
+        String queryEmbedding = embeddingService.getEmbedding(query);
+        if (queryEmbedding != null) {
+            List<Map<String, Object>> vectorResults = receiptRepository.vectorSearch(userId, queryEmbedding, topK);
+            for (Map<String, Object> row : vectorResults) {
+                Integer id = ((Number) row.get("id")).intValue();
+                double score = row.get("vector_score") != null ? ((Number) row.get("vector_score")).doubleValue() : 0.0;
+                vectorScoreMap.put(id, score);
+                vectorRowMap.put(id, row);
+            }
+        } else {
+            embeddingFailed = true;
+        }
+
+        Set<Integer> allIds = new HashSet<>();
+        allIds.addAll(fuzzyScoreMap.keySet());
+        allIds.addAll(vectorScoreMap.keySet());
+
+        List<ReceiptResponse> results = new ArrayList<>();
+        for (Integer id : allIds) {
+            double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
+            double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
+            double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
+            ReceiptResponse response = mapRowToReceiptResponse(row);
+            response.setSimilarity(combinedScore);
+            results.add(response);
+        }
+
+        results.sort((a, b) -> Double.compare(b.getSimilarity(), a.getSimilarity()));
+        List<ReceiptResponse> topResults = results.stream().limit(topK).toList();
+
+        if (embeddingFailed) return ServiceResult.withMessage(topResults, EMBEDDING_FAIL_MSG);
+        return ServiceResult.ok(topResults);
+    }
+
+    private ReceiptResponse mapRowToReceiptResponse(Map<String, Object> row) {
+        ReceiptResponse response = new ReceiptResponse();
+        response.setId(((Number) row.get("id")).intValue());
+        response.setUserId(UUID.fromString(row.get("user_id").toString()));
+        response.setDocType((String) row.get("doc_type"));
+        response.setMerchantName((String) row.get("merchant_name"));
+        response.setMerchantAddress((String) row.get("merchant_address"));
+        response.setPaymentMethod((String) row.get("payment_method"));
+        response.setCardCompany((String) row.get("card_company"));
+        response.setRawText((String) row.get("raw_text"));
+        response.setParsedJson(row.get("parsed_json") != null ? row.get("parsed_json").toString() : null);
+        response.setRawJson(row.get("raw_json") != null ? row.get("raw_json").toString() : null);
+        response.setCurrencyCode((String) row.get("currency_code"));
+        response.setItems(List.of());
+
+        if (row.get("classification_confidence") != null) {
+            response.setClassificationConfidence(new java.math.BigDecimal(row.get("classification_confidence").toString()));
+        }
+        if (row.get("total_amount") != null) {
+            response.setTotalAmount(new java.math.BigDecimal(row.get("total_amount").toString()));
+        }
+        if (row.get("purchase_date") instanceof java.sql.Date) {
+            response.setPurchaseDate(((java.sql.Date) row.get("purchase_date")).toLocalDate());
+        }
+        if (row.get("purchase_time") instanceof java.sql.Time) {
+            response.setPurchaseTime(((java.sql.Time) row.get("purchase_time")).toLocalTime());
+        }
+        response.setCreatedAt(toLocalDateTime(row.get("created_at")));
+        response.setUpdatedAt(toLocalDateTime(row.get("updated_at")));
+        return response;
+    }
+
+    private LocalDateTime toLocalDateTime(Object obj) {
+        if (obj instanceof Instant) {
+            return ((Instant) obj).atZone(ZoneId.systemDefault()).toLocalDateTime();
+        } else if (obj instanceof java.sql.Timestamp) {
+            return ((java.sql.Timestamp) obj).toLocalDateTime();
+        }
+        return null;
     }
 }

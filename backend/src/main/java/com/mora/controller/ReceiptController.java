@@ -6,13 +6,16 @@ import com.mora.dto.receipt.ReceiptResponse;
 import com.mora.dto.receipt.ReceiptSaveRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.ReceiptService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
+@Tag(name = "영수증", description = "영수증 관리 API")
 @RestController
 @RequestMapping("/api/receipts")
 public class ReceiptController {
@@ -78,6 +81,23 @@ public class ReceiptController {
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
             ServiceResult<ReceiptResponse> result = receiptService.update(userId, id, body);
             ApiResponse<ReceiptResponse> apiResponse = ApiResponse.ok(result.getData());
+            if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
+            return ResponseEntity.ok(apiResponse);
+        } catch (RuntimeException e) {
+            return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<ApiResponse<List<ReceiptResponse>>> search(
+            HttpServletRequest request,
+            @RequestParam("q") String query,
+            @RequestParam(value = "topK", defaultValue = "5") int topK) {
+        try {
+            UUID userId = getUserId(request);
+            if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
+            ServiceResult<List<ReceiptResponse>> result = receiptService.hybridSearch(userId, query, topK);
+            ApiResponse<List<ReceiptResponse>> apiResponse = ApiResponse.ok(result.getData());
             if (result.hasMessage()) apiResponse.setMessage(result.getMessage());
             return ResponseEntity.ok(apiResponse);
         } catch (RuntimeException e) {
