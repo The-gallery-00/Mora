@@ -1,11 +1,23 @@
 # OCR Engine
-paddlepaddle
-paddleocr
+# 버전 고정 필수: 미고정 시 Render가 최신(paddlepaddle 3.3.0+)을 설치하는데,
+# 3.3.0+ 는 CPU 추론에서 PIR→OneDNN 변환 회귀 버그
+# (ConvertPirAttribute2RuntimeAttribute not support / onednn_instruction.cc)가
+# 있어 /api/scan 이 500으로 깨진다. 3.0.x 로 고정한다.
+paddlepaddle==3.0.0
+paddleocr==3.0.0
 torch
 torchvision
-opencv-python
+# opencv-python(headless 아님)은 libGL.so.1 등 GUI 라이브러리를 요구해
+# Render 슬림 리눅스에서 ImportError가 난다. headless 버전 사용.
+opencv-python-headless
 Pillow
 numpy
+
+# ML 필드 추출기 (OCR_PARSER_STRATEGY=ml|hybrid 일 때만 사용)
+# 학습된 한국어 트랜스포머(klue/bert-base 파인튜닝)를
+# ocr/models/field_extractor/ 에서 lazy 로드한다. 전략이 rule(기본)이면
+# 로드되지 않으며, 모델/패키지 없거나 추론 실패 시 규칙기반으로 자동 폴백.
+transformers>=4.40
 
 # API Server
 fastapi
