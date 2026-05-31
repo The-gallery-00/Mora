@@ -23,6 +23,8 @@ public interface ReceiptRepository extends JpaRepository<Receipt, Integer> {
     @EntityGraph(attributePaths = "items")
     Optional<Receipt> findByIdAndUserId(Integer id, UUID userId);
 
+    long countByUserId(UUID userId);
+
     @Query(value = """
             SELECT r.*,
                 GREATEST(
