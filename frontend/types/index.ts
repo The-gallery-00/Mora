@@ -24,8 +24,16 @@ export interface BusinessCard {
   rawOcrText?: string
   raw_texts?: string[]   // OCR 스캔 시 프론트에서만 사용 (Python OCR 원본 블록)
   imageUrl?: string
+  groupId?: string | null
   createdAt?: string
   similarity?: number    // 검색 결과 유사도 (0~1)
+}
+
+export interface BusinessCardGroup {
+  id: string
+  name: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 // 문서 종류

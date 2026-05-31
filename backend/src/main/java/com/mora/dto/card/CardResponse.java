@@ -25,6 +25,7 @@ public class CardResponse {
     private String rawOcrText;
     // 명함 이미지 URL
     private String imageUrl;
+    private UUID groupId;
     private LocalDateTime createdAt;
     // 벡터 검색 시 코사인 유사도 점수 (0~1)
     private Double similarity;
@@ -43,6 +44,7 @@ public class CardResponse {
         response.setEmail(card.getEmail());
         response.setRawOcrText(card.getRawOcrText());
         response.setImageUrl(card.getImageUrl());
+        response.setGroupId(card.getGroupId());
         response.setCreatedAt(card.getCreatedAt());
         return response;
     }

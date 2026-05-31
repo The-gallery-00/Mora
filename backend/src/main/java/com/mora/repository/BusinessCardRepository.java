@@ -20,12 +20,18 @@ public interface BusinessCardRepository extends JpaRepository<BusinessCard, UUID
     // 페이지네이션 적용 목록 조회
     Page<BusinessCard> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
+    Page<BusinessCard> findByUserIdAndGroupIdOrderByCreatedAtDesc(UUID userId, UUID groupId, Pageable pageable);
+
+    Page<BusinessCard> findByUserIdAndGroupIdIsNullOrderByCreatedAtDesc(UUID userId, Pageable pageable);
+
     // 소유자 확인 포함 단건 조회
     Optional<BusinessCard> findByIdAndUserId(UUID id, UUID userId);
 
     long countByUserId(UUID userId);
 
     void deleteByUserId(UUID userId);
+
+    long countByGroupId(UUID groupId);
 
     //검색 대상 필드:name, company, position, phone, email, raw_ocr_text
 

@@ -5,6 +5,7 @@ import com.mora.dto.api.ApiResponse;
 import com.mora.dto.api.ServiceResult;
 import com.mora.dto.card.CardResponse;
 import com.mora.dto.card.CardRequest;
+import com.mora.dto.card.CardMoveGroupRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.CardService;
 import com.mora.service.SearchHistoryService;
@@ -74,11 +75,13 @@ public class CardController {
     public ResponseEntity<ApiResponse<Page<CardResponse>>> list(
             HttpServletRequest request,
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "10") int size) {
+            @RequestParam(value = "size", defaultValue = "10") int size,
+            @RequestParam(value = "groupId", required = false) UUID groupId,
+            @RequestParam(value = "ungrouped", defaultValue = "false") boolean ungrouped) {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
-            Page<CardResponse> cards = cardService.listByUser(userId, page, size);
+            Page<CardResponse> cards = cardService.listByUser(userId, page, size, groupId, ungrouped);
             return ResponseEntity.ok(ApiResponse.ok(cards));
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
@@ -132,6 +135,24 @@ public class CardController {
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
             cardService.delete(userId, id);
             return ResponseEntity.ok(ApiResponse.ok(null));
+        } catch (RuntimeException e) {
+            return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
+        }
+    }
+
+    /*
+     * 명함을 특정 그룹으로 이동한다. groupId가 null이면 미분류로 이동한다.
+     */
+    @PatchMapping("/{id}/group")
+    public ResponseEntity<ApiResponse<CardResponse>> moveGroup(
+            HttpServletRequest request,
+            @PathVariable UUID id,
+            @RequestBody(required = false) CardMoveGroupRequest body) {
+        try {
+            UUID userId = getUserId(request);
+            if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
+            UUID groupId = body == null ? null : body.getGroupId();
+            return ResponseEntity.ok(ApiResponse.ok(cardService.moveGroup(userId, id, groupId)));
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));
         }
