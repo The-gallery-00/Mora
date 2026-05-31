@@ -29,6 +29,7 @@ transformers>=4.40
 # API Server
 fastapi
 uvicorn
+gunicorn
 python-multipart
 
 # Config
