@@ -160,7 +160,14 @@ public class AuthController {
     }
 
     private UserResponse toUserResponse(User user) {
-        return new UserResponse(user.getId(), user.getEmail(), user.getName(), user.getPicture(), user.getProvider());
+        return new UserResponse(
+                user.getId(),
+                user.getEmail(),
+                user.getName(),
+                user.getPicture(),
+                user.getProvider(),
+                user.getCreatedAt()
+        );
     }
 
     private String resolveClientKey(HttpServletRequest request) {

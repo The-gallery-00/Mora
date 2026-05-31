@@ -1,7 +1,8 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Bell, Database, FileText, Info, Link, Link2, Monitor, RefreshCw, UserRoundCog } from 'lucide-react'
 import {
   changeName as apiChangeName,
   changePassword as apiChangePassword,
@@ -10,8 +11,6 @@ import {
   getGoogleCalendarConnectUrl,
   getMe,
 } from '@/lib/api'
-
-const CompactCtx = createContext(false)
 
 interface StoredUser {
   id?: string
@@ -35,6 +34,29 @@ function saveStoredUser(patch: Partial<StoredUser>) {
   localStorage.setItem('mora_user', JSON.stringify(next))
 }
 
+function formatJoinedAt(input?: string | number[]): string {
+  if (!input) return ''
+  // Jackson LocalDateTime can be serialized as [yyyy, m, d, h, m, s, ns]
+  if (Array.isArray(input) && input.length >= 3) {
+    const yyyy = String(input[0])
+    const mm = String(input[1]).padStart(2, '0')
+    const dd = String(input[2]).padStart(2, '0')
+    return `${yyyy}. ${mm}. ${dd}.`
+  }
+  if (typeof input !== 'string') return ''
+
+  // Spring LocalDateTime string usually starts with YYYY-MM-DD
+  const m = input.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return `${m[1]}. ${m[2]}. ${m[3]}.`
+
+  const d = new Date(input)
+  if (Number.isNaN(d.getTime())) return ''
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}. ${mm}. ${dd}.`
+}
+
 const PREFS_KEY = 'mora_settings_prefs'
 
 interface Prefs {
@@ -46,7 +68,6 @@ const DEFAULT_PREFS: Prefs = {
   toggles: {
     gcal: false,
     contacts: false,
-    compact: false,
     notifOcr: true,
     notifSchedule: true,
     notifSync: false,
@@ -75,7 +96,6 @@ function savePrefs(p: Prefs) {
 type ToggleKey =
   | 'gcal'
   | 'contacts'
-  | 'compact'
   | 'notifOcr'
   | 'notifSchedule'
   | 'notifSync'
@@ -109,7 +129,7 @@ export default function SettingsPage() {
   // Email is read-only until /me/email verification flow exists on backend
   const [email] = useState<string>(() => loadStoredUser().email || 'mvp6276@gmail.com')
   const [avatar, setAvatar] = useState<string | undefined>(() => loadStoredUser().avatar)
-  const [joinedAt] = useState('2025. 11. 03.')
+  const [joinedAt, setJoinedAt] = useState<string>(() => loadStoredUser().joinedAt || '')
   // 소셜 전용 계정에서는 비밀번호 변경을 차단해야 하므로 provider를 별도로 추적한다.
   const [provider, setProvider] = useState<string>(() => loadStoredUser().provider || 'local')
   const [userId, setUserId] = useState<string>(() => loadStoredUser().id || '')
@@ -126,7 +146,15 @@ export default function SettingsPage() {
       if (me.id) setUserId(me.id)
       if (me.provider) setProvider(me.provider)
       if (me.name) setNickname(me.name)
-      saveStoredUser({ id: me.id, name: me.name, email: me.email, provider: me.provider })
+      const joinedAtLabel = formatJoinedAt(me.createdAt)
+      if (joinedAtLabel) setJoinedAt(joinedAtLabel)
+      saveStoredUser({
+        id: me.id,
+        name: me.name,
+        email: me.email,
+        provider: me.provider,
+        joinedAt: joinedAtLabel || loadStoredUser().joinedAt,
+      })
 
       if (me.id) {
         const connectedRes = await getGoogleCalendarConnected(me.id)
@@ -171,9 +199,6 @@ export default function SettingsPage() {
     if (typeof document === 'undefined') return
     document.documentElement.dataset.theme = theme
   }, [theme])
-
-  // Compact mode shrinks row padding live (passed down to Row via prop)
-  const compact = toggles.compact
 
   // Hidden file input for avatar upload
   const fileRef = useRef<HTMLInputElement>(null)
@@ -264,11 +289,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <CompactCtx.Provider value={compact}>
     <div style={{ padding: '40px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
       {/* Page title */}
       <header style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: C.navy, marginBottom: 6 }}>설정</h1>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: C.navy, marginBottom: 6 }}>마이페이지</h1>
         <p style={{ fontSize: 13, color: C.mute }}>계정 정보, 서비스 연동, 데이터 관리 방식을 설정할 수 있습니다.</p>
       </header>
 
@@ -303,21 +327,21 @@ export default function SettingsPage() {
       >
         {/* LEFT */}
         <Column>
-          <Card title="계정 설정" subtitle="계정 식별 정보를 관리합니다.">
+          <Card
+            title="계정 설정"
+            subtitle="계정 식별 정보를 관리합니다."
+            titleIcon={<UserRoundCog size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="U" bg="#DBEAFE" fg="#2563EB" />}
               title="닉네임"
               desc={nickname}
               right={<Chevron label="변경" onClick={() => setModal('nickname')} />}
             />
             <Row
-              icon={<IconLetter ch="@" bg="#DCFCE7" fg="#166534" />}
               title="이메일"
               desc={email}
-              right={<Chevron label="변경" onClick={() => {/* TODO: open email modal once endpoint ready */}} />}
             />
             <Row
-              icon={<IconLetter ch="🔒" bg="#FEE2E2" fg="#991B1B" />}
               title="비밀번호"
               desc={isLocalAccount ? '마지막 변경 3개월 전' : '소셜 계정은 비밀번호가 없습니다'}
               right={
@@ -335,9 +359,12 @@ export default function SettingsPage() {
             />
           </Card>
 
-          <Card title="연동 설정" subtitle="OCR로 추출한 일정·연락처를 외부 서비스와 동기화합니다.">
+          <Card
+            title="연동 설정"
+            subtitle="OCR로 추출한 일정·연락처를 외부 서비스와 동기화합니다."
+            titleIcon={<Link size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="📅" bg="#DBEAFE" fg="#2563EB" />}
               title="Google Calendar"
               desc="추출된 일정을 캘린더로 자동 전송"
               right={
@@ -348,7 +375,6 @@ export default function SettingsPage() {
               }
             />
             <Row
-              icon={<IconLetter ch="☎" bg="#FFEDD5" fg="#9A3412" />}
               title="연락처"
               desc="명함에서 인식된 연락처 저장"
               right={
@@ -360,22 +386,23 @@ export default function SettingsPage() {
             />
           </Card>
 
-          <Card title="데이터 관리" subtitle="검색 기록 및 업로드한 자료를 정리합니다.">
+          <Card
+            title="데이터 관리"
+            subtitle="검색 기록 및 업로드한 자료를 정리합니다."
+            titleIcon={<Database size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="⌕" bg="#F1F5F9" fg="#475569" />}
               title="검색 기록"
               desc="저장된 모든 검색어를 삭제합니다."
-              right={<Chevron label="지우기" danger onClick={() => setModal('confirmDelete')} />}
+              right={<Chevron label="삭제" danger onClick={() => setModal('confirmDelete')} />}
             />
             <Row
-              icon={<IconLetter ch="☁" bg="#DBEAFE" fg="#2563EB" />}
               title="업로드 데이터 관리"
               desc="보관함의 원본 자료를 점검합니다."
               right={<Chevron label="열기" onClick={() => router.push('/dashboard/storage/cards')} />}
             />
             <Row
               tone="danger"
-              icon={<IconLetter ch="⚠" bg="#FEE2E2" fg="#B91C1C" />}
               title="내 데이터 전체 삭제"
               desc="복구할 수 없습니다. 신중히 진행하세요."
               right={<Chevron label="삭제" danger onClick={() => setModal('confirmDelete')} />}
@@ -385,57 +412,56 @@ export default function SettingsPage() {
 
         {/* RIGHT */}
         <Column>
-          <Card title="알림 설정" subtitle="브라우저 푸시 및 인앱 알림을 제어합니다.">
+          <Card
+            title="알림 설정"
+            subtitle="브라우저 푸시 및 인앱 알림을 제어합니다."
+            titleIcon={<Bell size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="✓" bg="#DCFCE7" fg="#166534" />}
               title="OCR 처리 완료"
               desc="문서 분석이 끝나면 알려드립니다."
               right={<Toggle on={toggles.notifOcr} onClick={() => flip('notifOcr')} />}
             />
             <Row
-              icon={<IconLetter ch="📅" bg="#DBEAFE" fg="#2563EB" />}
               title="일정 등록"
               desc="캘린더 등록이 완료될 때."
               right={<Toggle on={toggles.notifSchedule} onClick={() => flip('notifSchedule')} />}
             />
             <Row
-              icon={<IconLetter ch="⟳" bg="#EDE9FE" fg="#6D28D9" />}
               title="데이터 동기화"
               desc="외부 서비스 동기화 상태 변화."
               right={<Toggle on={toggles.notifSync} onClick={() => flip('notifSync')} />}
             />
           </Card>
 
-          <Card title="화면 설정" subtitle="테마와 표시 옵션을 변경합니다.">
+          <Card
+            title="화면 설정"
+            subtitle="테마와 표시 옵션을 변경합니다."
+            titleIcon={<Monitor size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="☀" bg="#FEF3C7" fg="#B45309" />}
               title="테마"
               desc={theme === 'light' ? '현재 라이트 모드' : '현재 다크 모드'}
               right={<Segmented value={theme} onChange={setTheme} />}
             />
-            <Row
-              icon={<IconLetter ch="▤" bg="#F1F5F9" fg="#475569" />}
-              title="컴팩트 보기"
-              desc="리스트 행 간격을 좁힙니다."
-              right={<Toggle on={toggles.compact} onClick={() => flip('compact')} />}
-            />
           </Card>
 
-          <Card title="고객 지원" subtitle="문의·약관·앱 정보를 확인합니다.">
+          <Card
+            title="고객 지원"
+            subtitle="문의·약관·앱 정보를 확인합니다."
+            titleIcon={<Info size={16} strokeWidth={2} />}
+          >
             <Row
-              icon={<IconLetter ch="💬" bg="#DBEAFE" fg="#2563EB" />}
               title="문의하기"
               desc="이메일로 문의를 보냅니다."
-              right={<Chevron label="열기" onClick={() => window.open('mailto:support@mora.app')} />}
+              right={<Chevron label="열기" onClick={() => window.open('https://mail.google.com/mail/?view=cm&fs=1&to=support@mora.app', '_blank', 'noopener,noreferrer')} />}
             />
             <Row
-              icon={<IconLetter ch="§" bg="#F1F5F9" fg="#475569" />}
               title="이용약관"
               desc="서비스 이용약관을 확인합니다."
               right={<Chevron label="보기" onClick={() => {/* TODO: navigate to terms */}} />}
             />
             <Row
-              icon={<IconLetter ch="🛡" bg="#DCFCE7" fg="#166534" />}
               title="개인정보 처리방침"
               desc="데이터 처리 방식을 확인합니다."
               right={<Chevron label="보기" onClick={() => {/* TODO: navigate to privacy */}} />}
@@ -514,7 +540,6 @@ export default function SettingsPage() {
         />
       )}
     </div>
-    </CompactCtx.Provider>
   )
 }
 
@@ -561,10 +586,11 @@ function ProfileCard({
         <div style={{ flex: 1, minWidth: 240 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: C.navy }}>{nickname}</h2>
-            <StatusBadge />
           </div>
           <p style={{ fontSize: 13, color: C.mute, marginBottom: 4 }}>{email}</p>
-          <p style={{ fontSize: 12, color: C.faint }}>{joinedAt} 가입</p>
+          <p style={{ fontSize: 12, color: C.faint }}>
+            {joinedAt ? `${joinedAt} 가입` : '가입일 정보 없음'}
+          </p>
         </div>
 
         {/* Actions */}
@@ -576,33 +602,18 @@ function ProfileCard({
 
       {/* Stat tiles */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-        <StatTile icon="📄" iconBg="#DBEAFE" iconFg="#2563EB" label="보관 문서" value={String(stats.docs)} hint="건" />
-        <StatTile icon="🔗" iconBg="#DCFCE7" iconFg="#166534" label="연동 서비스" value={String(stats.integrationsActive)} hint={`/ ${stats.integrationsTotal}`} />
-        <StatTile icon="⟳" iconBg="#EDE9FE" iconFg="#6D28D9" label="마지막 동기화" value={stats.lastSyncLabel} />
+        <StatTile icon={<FileText size={24} strokeWidth={2} />} iconFg="#2563EB" label="보관 문서" value={String(stats.docs)} hint="건" />
+        <StatTile icon={<Link2 size={24} strokeWidth={2} />} iconFg="#166534" label="연동 서비스" value={String(stats.integrationsActive)} hint={`/ ${stats.integrationsTotal}`} />
+        <StatTile icon={<RefreshCw size={24} strokeWidth={2} />} iconFg="#6D28D9" label="마지막 동기화" value={stats.lastSyncLabel} />
       </div>
     </section>
   )
 }
 
-function StatusBadge() {
-  return (
-    <span
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 4,
-        padding: '3px 8px', borderRadius: 999, background: C.successSoft,
-        fontSize: 11, fontWeight: 600, color: '#166534',
-      }}
-    >
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.success }} />
-      활성
-    </span>
-  )
-}
-
 function StatTile({
-  icon, iconBg, iconFg, label, value, hint,
+  icon, iconFg, label, value, hint,
 }: {
-  icon: string; iconBg: string; iconFg: string
+  icon: React.ReactNode; iconFg: string
   label: string; value: string; hint?: string
 }) {
   return (
@@ -614,9 +625,8 @@ function StatTile({
     >
       <div
         style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: iconBg, color: iconFg,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+          color: iconFg,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
         }}
       >
@@ -636,7 +646,17 @@ function Column({ children }: { children: React.ReactNode }) {
   return <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>{children}</div>
 }
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Card({
+  title,
+  subtitle,
+  titleIcon,
+  children,
+}: {
+  title: string
+  subtitle?: string
+  titleIcon?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <section
       style={{
@@ -645,8 +665,24 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
       }}
     >
       <header style={{ marginBottom: 14 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.navy, marginBottom: 4 }}>{title}</h3>
-        {subtitle && <p style={{ fontSize: 12, color: C.faint }}>{subtitle}</p>}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 8 }}>
+          <h3
+            style={{
+              fontSize: 15,
+              fontWeight: 700,
+              color: C.navy,
+              marginBottom: 0,
+            }}
+          >
+            {title}
+          </h3>
+          {titleIcon && (
+            <span style={{ display: 'inline-flex', color: C.navy, flexShrink: 0, lineHeight: 0 }}>
+              {titleIcon}
+            </span>
+          )}
+        </div>
+        {subtitle && <p style={{ fontSize: 12, color: C.faint, marginTop: 4 }}>{subtitle}</p>}
       </header>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>{children}</div>
     </section>
@@ -654,24 +690,22 @@ function Card({ title, subtitle, children }: { title: string; subtitle?: string;
 }
 
 function Row({
-  icon, title, desc, right, tone,
+  title, desc, right, tone,
 }: {
-  icon: React.ReactNode
   title: string
   desc?: string
-  right: React.ReactNode
+  right?: React.ReactNode
   tone?: 'danger'
 }) {
   const [hover, setHover] = useState(false)
-  const compact = useContext(CompactCtx)
   const danger = tone === 'danger'
   return (
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        display: 'flex', alignItems: 'center', gap: compact ? 10 : 12,
-        padding: compact ? '5px 8px' : '10px 8px',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '10px 2px',
         borderRadius: 10,
         background: danger
           ? '#FEFAFA'
@@ -681,27 +715,11 @@ function Row({
         transition: 'background 0.15s, padding 0.15s',
       }}
     >
-      {icon}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{ fontSize: 13, fontWeight: 600, color: C.navy }}>{title}</p>
         {desc && <p style={{ fontSize: 11, color: C.faint, marginTop: 2 }}>{desc}</p>}
       </div>
-      {right}
-    </div>
-  )
-}
-
-function IconLetter({ ch, bg, fg }: { ch: string; bg: string; fg: string }) {
-  return (
-    <div
-      style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: bg, color: fg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 16, fontWeight: 600, flexShrink: 0,
-      }}
-    >
-      {ch}
+      {right ?? null}
     </div>
   )
 }

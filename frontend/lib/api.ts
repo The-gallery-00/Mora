@@ -315,7 +315,7 @@ export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<Pos
 }
 
 /** 내 계정 정보 조회 (provider 확인용) */
-export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string }>> {
+export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string; createdAt?: string | number[] }>> {
   try {
     const res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() })
     const json = await res.json().catch(() => null)
