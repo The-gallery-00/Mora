@@ -11,3 +11,5 @@ httpx
 
 # Config
 python-dotenv
+
+langsmith
