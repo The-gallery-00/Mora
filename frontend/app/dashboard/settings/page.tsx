@@ -6,6 +6,8 @@ import { Bell, Database, FileText, Info, Link, Link2, Monitor, RefreshCw, UserRo
 import {
   changeName as apiChangeName,
   changePassword as apiChangePassword,
+  clearSearchHistories,
+  deleteMyDocuments,
   disconnectGoogleCalendar,
   getGoogleCalendarConnected,
   getGoogleCalendarConnectUrl,
@@ -101,7 +103,7 @@ type ToggleKey =
   | 'notifSync'
 
 type Theme = 'light' | 'dark'
-type ModalKind = null | 'password' | 'nickname' | 'confirmDelete' | 'confirmLeave'
+type ModalKind = null | 'password' | 'nickname' | 'confirmClearHistory' | 'confirmDeleteData' | 'confirmLeave'
 
 const C = {
   navy: '#15293D',
@@ -288,6 +290,31 @@ export default function SettingsPage() {
     router.replace('/')
   }
 
+  async function handleClearSearchHistories() {
+    const res = await clearSearchHistories()
+    if (!res.success) {
+      alert(res.error || '검색 기록 삭제에 실패했습니다.')
+      return
+    }
+    alert(`검색 기록 ${res.data}건을 삭제했습니다.`)
+    setModal(null)
+  }
+
+  async function handleDeleteMyDocuments() {
+    const res = await deleteMyDocuments()
+    if (!res.success) {
+      alert(res.error || '내 데이터 삭제에 실패했습니다.')
+      return
+    }
+    const deletedCount =
+      res.data.deletedBusinessCards +
+      res.data.deletedTickets +
+      res.data.deletedPosters +
+      res.data.deletedReceipts
+    alert(`저장 문서 ${deletedCount}건을 삭제했습니다.`)
+    setModal(null)
+  }
+
   return (
     <div style={{ padding: '40px 40px 80px', maxWidth: 1200, margin: '0 auto' }}>
       {/* Page title */}
@@ -394,7 +421,7 @@ export default function SettingsPage() {
             <Row
               title="검색 기록"
               desc="저장된 모든 검색어를 삭제합니다."
-              right={<Chevron label="삭제" danger onClick={() => setModal('confirmDelete')} />}
+              right={<Chevron label="삭제" danger onClick={() => setModal('confirmClearHistory')} />}
             />
             <Row
               title="업로드 데이터 관리"
@@ -405,7 +432,7 @@ export default function SettingsPage() {
               tone="danger"
               title="내 데이터 전체 삭제"
               desc="복구할 수 없습니다. 신중히 진행하세요."
-              right={<Chevron label="삭제" danger onClick={() => setModal('confirmDelete')} />}
+              right={<Chevron label="삭제" danger onClick={() => setModal('confirmDeleteData')} />}
             />
           </Card>
         </Column>
@@ -512,17 +539,27 @@ export default function SettingsPage() {
           onSave={handleNicknameSave}
         />
       )}
-      {modal === 'confirmDelete' && (
+      {modal === 'confirmClearHistory' && (
         <ConfirmModal
           icon="⚠"
           title="검색 기록을 모두 삭제할까요?"
           description="이 작업은 되돌릴 수 없습니다. 계속하려면 확인을 눌러주세요."
           confirmLabel="삭제"
           onClose={() => setModal(null)}
-          onConfirm={() => {
-            // TODO: call delete API
-            setModal(null)
-          }}
+          onConfirm={handleClearSearchHistories}
+        />
+      )}
+      {modal === 'confirmDeleteData' && (
+        <ConfirmModal
+          icon="⚠"
+          title="내 데이터 전체를 삭제할까요?"
+          description="저장한 명함, 티켓, 포스터, 영수증과 검색 기록이 삭제됩니다. 구글 캘린더 연동 자체는 유지됩니다."
+          confirmLabel="전체 삭제"
+          confirmText="전체삭제"
+          confirmTextLabel="확인 문구"
+          confirmTextPlaceholder="전체삭제"
+          onClose={() => setModal(null)}
+          onConfirm={handleDeleteMyDocuments}
         />
       )}
       {modal === 'confirmLeave' && (
@@ -1059,7 +1096,16 @@ function NicknameModal({
 }
 
 function ConfirmModal({
-  icon, title, description, confirmLabel, onClose, onConfirm, requirePassword,
+  icon,
+  title,
+  description,
+  confirmLabel,
+  onClose,
+  onConfirm,
+  requirePassword,
+  confirmText,
+  confirmTextLabel = '확인 문구',
+  confirmTextPlaceholder,
 }: {
   icon: string
   title: string
@@ -1068,9 +1114,15 @@ function ConfirmModal({
   onClose: () => void
   onConfirm: () => void
   requirePassword?: boolean
+  confirmText?: string
+  confirmTextLabel?: string
+  confirmTextPlaceholder?: string
 }) {
   const [pw, setPw] = useState('')
-  const canSubmit = !requirePassword || pw.length > 0
+  const [typedConfirmText, setTypedConfirmText] = useState('')
+  const passwordOk = !requirePassword || pw.length > 0
+  const confirmTextOk = !confirmText || typedConfirmText === confirmText
+  const canSubmit = passwordOk && confirmTextOk
   return (
     <ModalShell onClose={onClose}>
       <div
@@ -1088,6 +1140,22 @@ function ConfirmModal({
       {requirePassword && (
         <Field label="비밀번호">
           <PasswordInput value={pw} onChange={setPw} placeholder="••••••••" autoFocus />
+        </Field>
+      )}
+
+      {confirmText && (
+        <Field label={confirmTextLabel} hint={`계속하려면 "${confirmText}"를 정확히 입력하세요.`}>
+          <input
+            value={typedConfirmText}
+            onChange={e => setTypedConfirmText(e.target.value)}
+            placeholder={confirmTextPlaceholder || confirmText}
+            autoFocus={!requirePassword}
+            style={{
+              width: '100%', padding: '12px 14px', borderRadius: 10,
+              background: C.surface, border: `1px solid ${C.borderSoft}`,
+              fontSize: 14, color: C.navy, outline: 'none',
+            }}
+          />
         </Field>
       )}
 

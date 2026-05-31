@@ -412,6 +412,47 @@ export async function disconnectGoogleCalendar(userId: string): Promise<ApiRespo
   }
 }
 
+/** 검색 기록 전체 삭제 */
+export async function clearSearchHistories(): Promise<ApiResponse<number>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/search-histories`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data || 0 }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 내가 저장한 문서 데이터 전체 삭제 */
+export async function deleteMyDocuments(): Promise<ApiResponse<{
+  deletedBusinessCards: number
+  deletedTickets: number
+  deletedPosters: number
+  deletedReceipts: number
+  deletedSearchHistories: number
+  deletedGoogleCalendarMappings: number
+}>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/me/documents`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** 키워드로 명함 검색 */
 export async function searchCards(query: string): Promise<ApiResponse<BusinessCard[]>> {
   try {

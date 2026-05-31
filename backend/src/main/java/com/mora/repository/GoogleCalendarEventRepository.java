@@ -13,4 +13,8 @@ public interface GoogleCalendarEventRepository extends JpaRepository<GoogleCalen
             String documentType,
             String documentId
     );
+
+    long countByUserId(UUID userId);
+
+    void deleteByUserId(UUID userId);
 }
