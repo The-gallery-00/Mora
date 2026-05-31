@@ -171,10 +171,34 @@ export async function getMyCards(): Promise<ApiResponse<BusinessCard[]>> {
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `조회 실패 (${res.status})` }
     }
-    return { success: true, data: json.data }
+
+    const rawCards = Array.isArray(json.data)
+      ? json.data
+      : Array.isArray(json.data?.content)
+        ? json.data.content
+        : []
+
+    return { success: true, data: rawCards.map(normalizeBusinessCard) }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
+}
+
+function normalizeBusinessCard(card: BusinessCard & { createdAt?: string | number[] }): BusinessCard {
+  return {
+    ...card,
+    createdAt: normalizeDateTime(card.createdAt),
+  }
+}
+
+function normalizeDateTime(value?: string | number[]): string | undefined {
+  if (!value) return undefined
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && value.length >= 3) {
+    const [year, month, day, hour = 0, minute = 0, second = 0] = value
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`
+  }
+  return undefined
 }
 
 /** 명함 삭제 */
@@ -315,7 +339,7 @@ export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<Pos
 }
 
 /** 내 계정 정보 조회 (provider 확인용) */
-export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string }>> {
+export async function getMe(): Promise<ApiResponse<{ id: string; email: string; name: string; picture?: string; provider?: string; createdAt?: string | number[] }>> {
   try {
     const res = await fetch(`${API_BASE}/auth/me`, { headers: getAuthHeaders() })
     const json = await res.json().catch(() => null)
@@ -367,6 +391,24 @@ export async function changePassword(current: string, next: string): Promise<Api
   }
 }
 
+/** 회원 탈퇴 */
+export async function deleteAccount(password?: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/auth/me`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(password ? { password } : {}),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `회원 탈퇴 실패 (${res.status})` }
+    }
+    return { success: true, data: undefined }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** Google Calendar 연동 상태 조회 */
 export async function getGoogleCalendarConnected(userId: string): Promise<ApiResponse<{ userId: string; connected: boolean }>> {
   try {
@@ -405,6 +447,47 @@ export async function disconnectGoogleCalendar(userId: string): Promise<ApiRespo
     const json = await res.json().catch(() => null)
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `연동 해제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 검색 기록 전체 삭제 */
+export async function clearSearchHistories(): Promise<ApiResponse<number>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/search-histories`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data || 0 }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+/** 내가 저장한 문서 데이터 전체 삭제 */
+export async function deleteMyDocuments(): Promise<ApiResponse<{
+  deletedBusinessCards: number
+  deletedTickets: number
+  deletedPosters: number
+  deletedReceipts: number
+  deletedSearchHistories: number
+  deletedGoogleCalendarMappings: number
+}>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/me/documents`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
     }
     return { success: true, data: json.data }
   } catch {

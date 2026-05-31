@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,6 +20,33 @@ public interface PosterRepository extends JpaRepository<Poster, Integer> {
     Page<Poster> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
     Optional<Poster> findByIdAndUserId(Integer id, UUID userId);
+
+    long countByUserId(UUID userId);
+
+    @Query("""
+            SELECT p FROM Poster p
+            WHERE p.userId = :userId
+              AND (
+                  p.eventStartDate = :date
+                  OR p.eventEndDate = :date
+                  OR (:date BETWEEN p.eventStartDate AND p.eventEndDate)
+              )
+            ORDER BY p.eventStartDate ASC
+            """)
+    List<Poster> findSchedulesByDate(@Param("userId") UUID userId, @Param("date") LocalDate date);
+
+    @Query("""
+            SELECT p FROM Poster p
+            WHERE p.userId = :userId
+              AND COALESCE(p.eventEndDate, p.eventStartDate) BETWEEN :startDate AND :endDate
+            ORDER BY COALESCE(p.eventEndDate, p.eventStartDate) ASC
+            """)
+    List<Poster> findDeadlines(
+            @Param("userId") UUID userId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
+    );
+    void deleteByUserId(UUID userId);
 
     @Query(value = """
             SELECT p.*,

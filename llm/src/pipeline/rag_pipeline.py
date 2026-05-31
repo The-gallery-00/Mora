@@ -1,5 +1,6 @@
 # rag_pipeline.py — RAG 엔드투엔드 파이프라인
 
+from langsmith import traceable
 from src.retriever.hybrid_retriever import HybridRetriever
 from src.llm.openai_client import OpenAIClient
 
@@ -13,6 +14,7 @@ class RagPipeline:
         self.retriever = HybridRetriever()
         self.llm = OpenAIClient()
 
+    @traceable(name="RAG Pipeline")
     async def run(
         self,
         query: str,

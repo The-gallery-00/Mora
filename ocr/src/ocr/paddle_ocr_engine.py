@@ -91,17 +91,31 @@ MAX_SIDE = 1280
 class PaddleOCREngine:
     def __init__(self, lang="korean"):
         # PaddleOCR 엔진 초기화 (문서 방향 감지/왜곡 보정 비활성화로 속도 향상)
+        #
+        # enable_mkldnn=False: OneDNN(MKL-DNN) 가속을 끈다.
+        #   paddlepaddle 3.3.0+ 는 CPU 추론 시 PIR→OneDNN 변환에서
+        #   "ConvertPirAttribute2RuntimeAttribute not support" 회귀 버그가 있다.
+        #   환경변수 FLAGS_use_mkldnn=0 만으로는 PaddleOCR 3.x 가 무시할 수 있어
+        #   (PaddleOCR #15632/#15782) 생성자 인자로 직접 꺼야 확실하다.
+        #   Render 같은 CPU 서버 배포에서 /api/scan 500 을 막는 핵심 설정.
         options = {
             "lang": lang,
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
+            "enable_mkldnn": False,
         }
+        # 구버전 PaddleOCR가 받지 않는 옵션이 있으면 하나씩 제거 후 재시도.
+        # enable_mkldnn 은 OneDNN 버그 회피의 핵심이라 최대한 늦게 제거한다.
         try:
             self.ocr = PaddleOCR(**options)
         except TypeError:
             options.pop("use_textline_orientation", None)
-            self.ocr = PaddleOCR(**options)
+            try:
+                self.ocr = PaddleOCR(**options)
+            except TypeError:
+                options.pop("enable_mkldnn", None)
+                self.ocr = PaddleOCR(**options)
 
     def _preprocess_image(self, image_path: str) -> str:
         """이미지 긴 변이 MAX_SIDE를 초과하면 비율 유지 리사이즈."""

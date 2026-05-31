@@ -2,6 +2,7 @@
 
 import os
 
+from langsmith import traceable
 from openai import OpenAI
 
 # 문서 타입별 한국어 설명 (프롬프트 내 컨텍스트 제목용)
@@ -75,6 +76,7 @@ class OpenAIClient:
         self.client = OpenAI(api_key=api_key)
         self.model = "gpt-4o-mini"
 
+    @traceable(name="GPT-4o-mini Generate")
     def generate(self, query: str, context_docs: list[dict], document_type: str) -> str:
         """
         검색된 문서들을 컨텍스트로 LLM 답변을 생성한다.
