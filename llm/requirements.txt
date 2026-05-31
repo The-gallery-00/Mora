@@ -1,0 +1,13 @@
+# LLM Engine
+openai
+
+# API Server
+fastapi
+uvicorn
+python-multipart
+
+# HTTP Client (백엔드 검색 API 호출용)
+httpx
+
+# Config
+python-dotenv
