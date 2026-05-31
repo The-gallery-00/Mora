@@ -117,11 +117,9 @@ export async function saveCard(
         parsedJson: JSON.stringify({ ...fields, imageUrl }),
         rawJson: JSON.stringify(rawBlocks),
       }
-    } else {
-      // BUSINESS_CARD, RECEIPT, ETC → 기존 명함 엔드포인트
-      url = `${API_BASE}/api/save`
+    } else if (documentType === 'BUSINESS_CARD') {
+      url = `${API_BASE}/api/cards/save`
       body = {
-        documentType,
         imageUrl,
         rawOcrText: rawTexts.join('\n'),
         name: fields.name || '',
@@ -129,8 +127,27 @@ export async function saveCard(
         position: fields.job_title || '',
         phone: fields.mobile_phone || fields.contact_phone || '',
         email: fields.email || fields.contact_email || '',
-        fields,
       }
+    } else if (documentType === 'RECEIPT') {
+      url = `${API_BASE}/api/receipts/save`
+      body = {
+        docType: documentType,
+        classificationConfidence: confidence,
+        merchantName: fields.store_name || fields.merchant_name || '',
+        merchantAddress: fields.merchant_address || fields.address || '',
+        purchaseDate: fields.purchase_date || '',
+        purchaseTime: fields.purchase_time || '',
+        paymentMethod: fields.payment_method || '',
+        cardCompany: fields.card_company || '',
+        totalAmount: parseMoney(fields.total_amount),
+        currencyCode: fields.currency_code || 'KRW',
+        rawText: rawTexts,
+        parsedJson: JSON.stringify({ ...fields, imageUrl }),
+        rawJson: JSON.stringify(rawBlocks),
+        items: [],
+      }
+    } else {
+      return { success: false, error: '저장할 수 없는 문서 유형입니다.' }
     }
 
     const res = await fetch(url, {
@@ -160,6 +177,14 @@ export async function saveCard(
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
+}
+
+function parseMoney(value?: string): number | null {
+  if (!value) return null
+  const normalized = value.replace(/[^\d.-]/g, '')
+  if (!normalized) return null
+  const amount = Number(normalized)
+  return Number.isFinite(amount) ? amount : null
 }
 
 /** 내 명함 목록 조회 */
