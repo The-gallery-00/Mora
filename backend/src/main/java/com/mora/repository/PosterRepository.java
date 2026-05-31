@@ -20,6 +20,10 @@ public interface PosterRepository extends JpaRepository<Poster, Integer> {
 
     Optional<Poster> findByIdAndUserId(Integer id, UUID userId);
 
+    long countByUserId(UUID userId);
+
+    void deleteByUserId(UUID userId);
+
     @Query(value = """
             SELECT p.*,
                 GREATEST(

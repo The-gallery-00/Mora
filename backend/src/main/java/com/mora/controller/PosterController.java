@@ -7,6 +7,7 @@ import com.mora.dto.poster.PosterResponse;
 import com.mora.dto.poster.PosterRequest;
 import com.mora.security.JwtUtil;
 import com.mora.service.PosterService;
+import com.mora.service.SearchHistoryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -21,10 +22,12 @@ import java.util.UUID;
 public class PosterController {
 
     private final PosterService posterService;
+    private final SearchHistoryService searchHistoryService;
     private final JwtUtil jwtUtil;
 
-    public PosterController(PosterService posterService, JwtUtil jwtUtil) {
+    public PosterController(PosterService posterService, SearchHistoryService searchHistoryService, JwtUtil jwtUtil) {
         this.posterService = posterService;
+        this.searchHistoryService = searchHistoryService;
         this.jwtUtil = jwtUtil;
     }
 
@@ -145,6 +148,7 @@ public class PosterController {
         try {
             UUID userId = getUserId(request);
             if (userId == null) return ResponseEntity.status(401).body(ApiResponse.fail("Login required"));
+            searchHistoryService.record(userId, "POSTER", query);
             ServiceResult<List<PosterResponse>> result = posterService.hybridSearch(userId, query, topK);
             ApiResponse<List<PosterResponse>> apiResponse = ApiResponse.ok(result.getData());
             if (result.hasMessage()) apiResponse.setMessage(result.getMessage());

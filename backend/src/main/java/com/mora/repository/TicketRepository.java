@@ -22,6 +22,10 @@ public interface TicketRepository extends JpaRepository<Ticket, Integer> {
     // 특정 사용자의  티켓 조회
     Optional<Ticket> findByIdAndUserId(Integer id, UUID userId);
 
+    long countByUserId(UUID userId);
+
+    void deleteByUserId(UUID userId);
+
     // 검색 대상 : 출발지, 도착지, 운송수단, 전체 OCR 텍스트
     @Query(value = """
             SELECT t.*,
