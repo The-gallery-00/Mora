@@ -1,6 +1,7 @@
 package com.mora.controller;
 
 import com.mora.dto.api.ApiResponse;
+import com.mora.dto.llm.ChatRequest;
 import com.mora.service.LlmService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,11 +23,11 @@ public class LlmController {
 
     @PostMapping("/chat")
     public ResponseEntity<ApiResponse<Map<String, Object>>> chat(
-            @RequestBody Map<String, Object> requestBody,
+            @RequestBody ChatRequest chatRequest,
             HttpServletRequest request) {
         try {
             String authHeader = request.getHeader("Authorization");
-            Map<String, Object> result = llmService.chat(requestBody, authHeader);
+            Map<String, Object> result = llmService.chat(chatRequest, authHeader);
             return ResponseEntity.ok(ApiResponse.ok(result));
         } catch (RuntimeException e) {
             return ResponseEntity.internalServerError().body(ApiResponse.fail(e.getMessage()));

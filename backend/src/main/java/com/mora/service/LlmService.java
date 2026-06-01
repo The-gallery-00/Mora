@@ -1,5 +1,6 @@
 package com.mora.service;
 
+import com.mora.dto.llm.ChatRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -20,7 +21,7 @@ public class LlmService {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> chat(Map<String, Object> requestBody, String authorizationHeader) {
+    public Map<String, Object> chat(ChatRequest chatRequest, String authorizationHeader) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -28,7 +29,14 @@ public class LlmService {
                 headers.set("Authorization", authorizationHeader);
             }
 
-            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
+            // LLM 서버가 snake_case 필드명을 사용하므로 변환
+            Map<String, Object> body = Map.of(
+                    "query", chatRequest.getQuery(),
+                    "document_type", chatRequest.getDocumentType(),
+                    "top_k", chatRequest.getTopK()
+            );
+
+            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
             ResponseEntity<Map> response = restTemplate.exchange(
                     llmServiceUrl + "/api/chat",
@@ -37,7 +45,8 @@ public class LlmService {
                     Map.class
             );
 
-            return response.getBody();
+            Map<String, Object> responseBody = response.getBody();
+            return (Map<String, Object>) responseBody.get("data");
         } catch (Exception e) {
             throw new RuntimeException("LLM service call failed: " + e.getMessage(), e);
         }
