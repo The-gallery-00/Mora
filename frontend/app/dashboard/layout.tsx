@@ -18,6 +18,8 @@ const STORAGE_ITEMS = [
   { label: '영수증', href: '/dashboard/storage/receipts' },
 ]
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
+
 type Session = {
   ready: boolean
   hasToken: boolean
@@ -104,6 +106,35 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (session.ready && !session.hasToken) {
       router.replace('/login')
     }
+  }, [router, session.hasToken, session.ready])
+
+  useEffect(() => {
+    if (!session.ready || !session.hasToken) return
+
+    const token = localStorage.getItem('mora_token')
+    if (!token) return
+
+    const controller = new AbortController()
+
+    fetch(`${API_BASE}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    })
+      .then((res) => {
+        if (res.status === 401 || res.status === 400) {
+          localStorage.removeItem('mora_token')
+          localStorage.removeItem('mora_user')
+          window.dispatchEvent(new Event('mora-session-change'))
+          router.replace('/login')
+        }
+      })
+      .catch((error) => {
+        if (error?.name !== 'AbortError') {
+          console.warn('Unable to validate login session.', error)
+        }
+      })
+
+    return () => controller.abort()
   }, [router, session.hasToken, session.ready])
 
   // 드롭다운 바깥 클릭 시 닫기
