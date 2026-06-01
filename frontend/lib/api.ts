@@ -588,6 +588,7 @@ export async function deleteMyDocuments(): Promise<ApiResponse<{
   deletedReceipts: number
   deletedSearchHistories: number
   deletedGoogleCalendarMappings: number
+  deletedNotifications: number
 }>> {
   try {
     const res = await fetch(`${API_BASE}/api/me/documents`, {
@@ -599,6 +600,123 @@ export async function deleteMyDocuments(): Promise<ApiResponse<{
       return { success: false, error: json?.error || `삭제 실패 (${res.status})` }
     }
     return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+export type NotificationItem = {
+  id: string
+  type: string
+  title: string
+  message: string
+  linkUrl?: string | null
+  read: boolean
+  readAt?: string | null
+  createdAt: string
+}
+
+type PageResponse<T> = {
+  content?: T[]
+  totalElements?: number
+  totalPages?: number
+  number?: number
+  size?: number
+}
+
+export async function getNotifications(page = 0, size = 10): Promise<ApiResponse<PageResponse<NotificationItem>>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/notifications?page=${page}&size=${size}`, {
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `알림 조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+export async function getUnreadNotificationCount(): Promise<ApiResponse<number>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/notifications/unread-count`, {
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `알림 개수 조회 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data?.count || 0 }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+export async function markNotificationAsRead(notificationId: string): Promise<ApiResponse<NotificationItem>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/notifications/${notificationId}/read`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `알림 읽음 처리 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+export async function markAllNotificationsAsRead(): Promise<ApiResponse<number>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/notifications/read-all`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `전체 읽음 처리 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data?.updatedCount || 0 }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+export async function deleteNotification(notificationId: string): Promise<ApiResponse<void>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/notifications/${notificationId}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    })
+    const json = await res.json().catch(() => null)
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `알림 삭제 실패 (${res.status})` }
+    }
+    return { success: true, data: undefined }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
