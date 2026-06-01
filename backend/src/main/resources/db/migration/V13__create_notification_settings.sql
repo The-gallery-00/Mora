@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS notification_settings (
+    user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    deadline_reminder_days INTEGER NOT NULL DEFAULT 3,
+    deadline_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    schedule_reminder_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
