@@ -8,6 +8,13 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function clearAuthSession() {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem('mora_token')
+  localStorage.removeItem('mora_user')
+  window.dispatchEvent(new Event('mora-session-change'))
+}
+
 /** 이미지 파일을 서버로 보내 분류 + OCR 수행 */
 export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
   try {
@@ -156,6 +163,11 @@ export async function saveCard(
       body: JSON.stringify(body),
     })
     const json = await res.json().catch(() => null)
+
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
 
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `저장 실패 (${res.status})` }
