@@ -1,4 +1,4 @@
-import type { BusinessCard, BusinessCardGroup, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse } from '@/types'
+﻿import type { BusinessCard, BusinessCardGroup, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse, ReceiptResponse } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 const OCR_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -8,7 +8,14 @@ function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-/** 이미지 파일을 서버에 보내 분류 + OCR 수행 */
+function clearAuthSession() {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem('mora_token')
+  localStorage.removeItem('mora_user')
+  window.dispatchEvent(new Event('mora-session-change'))
+}
+
+/** 이미지 파일을 서버로 보내 분류 + OCR 수행 */
 export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
   try {
     const formData = new FormData()
@@ -25,7 +32,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
       return { success: false, error: json?.error || `서버 에러 (${res.status})` }
     }
 
-    // Spring 백엔드가 Python OCR 응답을 한 번 더 감싸는 구조를 풀어서 추출
+    // Spring 백엔드가 Python OCR 응답을 래핑한 구조를 고려해서 추출
     const inner = json.data?.data || json.data || {}
     const parsed = inner.parsed || json.data?.parsed || {}
     const fields = inner.fields || json.data?.fields || {}
@@ -49,7 +56,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
   }
 }
 
-/** 이미지 파일을 서버에 보내 OCR 수행 (명함 전용, 하위 호환) */
+/** 이미지 파일을 서버로 보내 OCR 수행 (명함 전용, 하위 호환) */
 export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   const res = await scanImage(file)
   if (!res.success) return res
@@ -69,7 +76,7 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   }
 }
 
-/** 문서 데이터를 DB에 저장 — 문서 종류에 따라 다른 엔드포인트로 분기 */
+/** 문서 데이터를 DB에 저장. 문서 종류에 따라 다른 엔드포인트로 분기 */
 export async function saveCard(
   documentType: DocumentType,
   fields: Record<string, string>,
@@ -147,7 +154,7 @@ export async function saveCard(
         items: [],
       }
     } else {
-      return { success: false, error: '저장할 수 없는 문서 유형입니다.' }
+      return { success: false, error: '지원하지 않는 문서 유형입니다.' }
     }
 
     const res = await fetch(url, {
@@ -156,6 +163,11 @@ export async function saveCard(
       body: JSON.stringify(body),
     })
     const json = await res.json().catch(() => null)
+
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
 
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `저장 실패 (${res.status})` }
@@ -245,7 +257,7 @@ export async function createCardGroup(name: string): Promise<ApiResponse<Busines
   }
 }
 
-/** 명함 그룹 삭제. 그룹 안의 명함은 미분류로 이동된다. */
+/** 명함 그룹 삭제. 그룹 내 명함은 미분류로 이동된다. */
 export async function deleteCardGroup(groupId: string): Promise<ApiResponse<void>> {
   try {
     const res = await fetch(`${API_BASE}/api/card-groups/${groupId}`, {
@@ -262,7 +274,7 @@ export async function deleteCardGroup(groupId: string): Promise<ApiResponse<void
   }
 }
 
-/** 명함을 그룹으로 이동. groupId가 null이면 미분류로 이동한다. */
+/** 명함을 그룹으로 이동. groupId가 null이면 미분류로 이동된다. */
 export async function moveCardToGroup(cardId: string, groupId: string | null): Promise<ApiResponse<BusinessCard>> {
   try {
     const res = await fetch(`${API_BASE}/api/cards/${cardId}/group`, {
@@ -402,6 +414,7 @@ export async function updatePoster(posterId: string, body: Record<string, unknow
   }
 }
 
+
 /** 내 티켓 목록 조회 */
 export async function getMyTickets(page = 0, size = 20): Promise<ApiResponse<TicketResponse[]>> {
   try {
@@ -476,7 +489,7 @@ export async function changePassword(current: string, next: string): Promise<Api
     })
     const json = await res.json().catch(() => null)
     if (res.status === 429) {
-      return { success: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도하세요.' }
+      return { success: false, error: '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.' }
     }
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `변경 실패 (${res.status})` }
@@ -593,17 +606,96 @@ export async function deleteMyDocuments(): Promise<ApiResponse<{
 
 /** 키워드로 명함 검색 */
 export async function searchCards(query: string): Promise<ApiResponse<BusinessCard[]>> {
+  const encoded = encodeURIComponent(query)
+  return runSearch<BusinessCard>(`/api/cards/search?q=${encoded}&topK=50`, normalizeBusinessCard)
+}
+
+/** 키워드로 티켓 검색 */
+export async function searchTickets(query: string): Promise<ApiResponse<TicketResponse[]>> {
+  const encoded = encodeURIComponent(query)
+  return runSearch<TicketResponse>(`/api/tickets/search?q=${encoded}&topK=50`, normalizeTicketResponse)
+}
+
+/** 키워드로 포스터 검색 */
+export async function searchPosters(query: string): Promise<ApiResponse<PosterResponse[]>> {
+  const encoded = encodeURIComponent(query)
+  return runSearch<PosterResponse>(`/api/posters/search?q=${encoded}&topK=50`, normalizePosterResponse)
+}
+
+async function runSearch<T>(
+  path: string,
+  normalizer?: (item: T) => T,
+): Promise<ApiResponse<T[]>> {
   try {
-    const res = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`, {
+    const res = await fetch(`${API_BASE}${path}`, {
       headers: getAuthHeaders(),
     })
     const json = await res.json().catch(() => null)
 
     if (!res.ok || !json?.success) {
-      return { success: false, error: json?.error || `검색 실패 (${res.status})` }
+      // 검색 실패 메시지는 백엔드 인코딩 이슈가 있어도 깨지지 않도록
+      // 상태 코드 기반의 고정 문구를 우선 사용한다.
+      return { success: false, error: `검색 결과를 불러오지 못했습니다. (${res.status})` }
     }
-    return { success: true, data: json.data || [] }
+
+    const rawItems = Array.isArray(json.data)
+      ? json.data
+      : Array.isArray(json.data?.content)
+        ? json.data.content
+        : []
+
+    const items = normalizer
+      ? rawItems.map((item: T) => normalizer(item))
+      : rawItems
+
+    return { success: true, data: items }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
+function normalizeTicketResponse(ticket: TicketResponse & { createdAt?: string | number[] }): TicketResponse {
+  return {
+    ...ticket,
+    createdAt: normalizeDateTime(ticket.createdAt) || '',
+  }
+}
+
+function normalizePosterResponse(poster: PosterResponse & { createdAt?: string | number[] }): PosterResponse {
+  return {
+    ...poster,
+    createdAt: normalizeDateTime(poster.createdAt) || '',
+  }
+}
+
+
+/** 영수증 수정 */
+export async function updateReceipt(receiptId: string, body: Record<string, unknown>): Promise<ApiResponse<ReceiptResponse>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/receipts/${receiptId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || '수정 실패' }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: '서버 연결 실패' }
+  }
+}
+
+/** 키워드로 영수증 검색 */
+export async function searchReceipts(query: string): Promise<ApiResponse<ReceiptResponse[]>> {
+  const encoded = encodeURIComponent(query)
+  return runSearch<ReceiptResponse>(`/api/receipts/search?q=${encoded}&topK=50`, normalizeReceiptResponse)
+}
+
+function normalizeReceiptResponse(receipt: ReceiptResponse & { createdAt?: string | number[] }): ReceiptResponse {
+  return {
+    ...receipt,
+    createdAt: normalizeDateTime(receipt.createdAt) || '',
   }
 }
