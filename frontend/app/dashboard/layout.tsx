@@ -3,6 +3,14 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  deleteNotification,
+  getNotifications,
+  getUnreadNotificationCount,
+  markAllNotificationsAsRead,
+  markNotificationAsRead,
+  type NotificationItem,
+} from '@/lib/api'
 
 const SEARCH_CATEGORIES = [
   { label: '명함', value: 'BUSINESS_CARD' },
@@ -68,6 +76,23 @@ function subscribeSession(onStoreChange: () => void) {
   }
 }
 
+function formatNotificationTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+
+  const diffMinutes = Math.floor((Date.now() - date.getTime()) / 60000)
+  if (diffMinutes < 1) return '방금 전'
+  if (diffMinutes < 60) return `${diffMinutes}분 전`
+
+  const diffHours = Math.floor(diffMinutes / 60)
+  if (diffHours < 24) return `${diffHours}시간 전`
+
+  return date.toLocaleDateString('ko-KR', {
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -77,6 +102,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isCategoryOpen, setIsCategoryOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [activeCategoryIndex, setActiveCategoryIndex] = useState(0)
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [isNotificationLoading, setIsNotificationLoading] = useState(false)
   const session = useSyncExternalStore(subscribeSession, readSession, () => EMPTY_SESSION)
   const storageRef = useRef<HTMLDivElement>(null)
   const storageTriggerRef = useRef<HTMLButtonElement>(null)
@@ -84,6 +113,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const categoryRef = useRef<HTMLDivElement>(null)
   const categoryTriggerRef = useRef<HTMLButtonElement>(null)
   const categoryOptionRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const notificationRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -152,10 +182,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       if (categoryRef.current && !categoryRef.current.contains(e.target as Node)) {
         setIsCategoryOpen(false)
       }
+      if (notificationRef.current && !notificationRef.current.contains(e.target as Node)) {
+        setIsNotificationOpen(false)
+      }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  useEffect(() => {
+    if (!session.hasToken) return
+
+    getUnreadNotificationCount().then(res => {
+      if (res.success) {
+        setUnreadCount(res.data || 0)
+      }
+    })
+  }, [session.hasToken])
 
   useEffect(() => {
     if (isStorageOpen) {
@@ -304,6 +347,63 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.replace('/login')
   }
 
+  async function loadNotifications() {
+    setIsNotificationLoading(true)
+    const res = await getNotifications(0, 10)
+    if (res.success) {
+      setNotifications(res.data?.content || [])
+    }
+    setIsNotificationLoading(false)
+  }
+
+  async function handleNotificationToggle() {
+    const nextOpen = !isNotificationOpen
+    setIsNotificationOpen(nextOpen)
+    if (nextOpen) {
+      await loadNotifications()
+    }
+  }
+
+  async function handleNotificationClick(notification: NotificationItem) {
+    if (!notification.read) {
+      const res = await markNotificationAsRead(notification.id)
+      if (res.success) {
+        setUnreadCount(count => Math.max(count - 1, 0))
+        setNotifications(items =>
+          items.map(item => item.id === notification.id
+            ? { ...item, read: true, readAt: res.data?.readAt }
+            : item),
+        )
+      }
+    }
+
+    if (notification.linkUrl) {
+      setIsNotificationOpen(false)
+      router.push(notification.linkUrl)
+    }
+  }
+
+  async function handleReadAllNotifications() {
+    const res = await markAllNotificationsAsRead()
+    if (res.success) {
+      setUnreadCount(0)
+      setNotifications(items =>
+        items.map(item => ({ ...item, read: true, readAt: item.readAt || new Date().toISOString() })),
+      )
+    }
+  }
+
+  async function handleDeleteNotification(notificationId: string) {
+    const target = notifications.find(item => item.id === notificationId)
+    const res = await deleteNotification(notificationId)
+    if (res.success) {
+      setNotifications(items => items.filter(item => item.id !== notificationId))
+      if (target && !target.read) {
+        setUnreadCount(count => Math.max(count - 1, 0))
+      }
+    }
+  }
+
   if (!session.ready) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#FFFFFF' }}>
@@ -317,6 +417,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const currentCategory = SEARCH_CATEGORIES.find(c => c.value === searchCategory)
+  const unreadLabel = unreadCount > 99 ? '99+' : String(unreadCount)
 
   return (
     <div style={{ minWidth: 1200, minHeight: '100vh', background: '#FFFFFF' }}>
@@ -608,26 +709,167 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           {/* 알림 아이콘 */}
-          <button
-            type="button"
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 8,
-              border: 'none',
-              background: 'transparent',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#505050',
-            }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 01-3.46 0" />
-            </svg>
-          </button>
+          <div ref={notificationRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={handleNotificationToggle}
+              aria-label="알림"
+              aria-expanded={isNotificationOpen}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 8,
+                border: 'none',
+                background: isNotificationOpen ? '#F0F9FF' : 'transparent',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: isNotificationOpen ? '#0077B6' : '#505050',
+                position: 'relative',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 01-3.46 0" />
+              </svg>
+              {unreadCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 3,
+                    minWidth: 16,
+                    height: 16,
+                    padding: '0 4px',
+                    borderRadius: 999,
+                    background: '#EF4444',
+                    color: '#FFFFFF',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  {unreadLabel}
+                </span>
+              )}
+            </button>
+            {isNotificationOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  right: 0,
+                  marginTop: 8,
+                  width: 360,
+                  maxHeight: 420,
+                  background: '#FFFFFF',
+                  border: '1px solid #CBD5E1',
+                  borderRadius: 8,
+                  boxShadow: '0 12px 28px rgba(15,23,42,0.14)',
+                  overflow: 'hidden',
+                  zIndex: 200,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '14px 16px',
+                    borderBottom: '1px solid #E2E8F0',
+                  }}
+                >
+                  <strong style={{ fontSize: 15, color: '#162B3F' }}>알림</strong>
+                  <button
+                    type="button"
+                    onClick={handleReadAllNotifications}
+                    disabled={unreadCount === 0}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: unreadCount === 0 ? '#94A3B8' : '#0077B6',
+                      fontSize: 12,
+                      cursor: unreadCount === 0 ? 'default' : 'pointer',
+                    }}
+                  >
+                    모두 읽음
+                  </button>
+                </div>
+                <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                  {isNotificationLoading && (
+                    <div style={{ padding: 24, textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+                      알림을 불러오는 중...
+                    </div>
+                  )}
+                  {!isNotificationLoading && notifications.length === 0 && (
+                    <div style={{ padding: 28, textAlign: 'center', color: '#94A3B8', fontSize: 13 }}>
+                      새 알림이 없습니다
+                    </div>
+                  )}
+                  {!isNotificationLoading && notifications.map(notification => (
+                    <div
+                      key={notification.id}
+                      style={{
+                        display: 'flex',
+                        gap: 10,
+                        padding: '14px 16px',
+                        borderBottom: '1px solid #F1F5F9',
+                        background: notification.read ? '#FFFFFF' : '#F8FAFC',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handleNotificationClick(notification)}
+                        style={{
+                          flex: 1,
+                          border: 'none',
+                          background: 'transparent',
+                          padding: 0,
+                          textAlign: 'left',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                          {!notification.read && (
+                            <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#2563EB', flexShrink: 0 }} />
+                          )}
+                          <span style={{ fontSize: 13, fontWeight: 700, color: '#162B3F' }}>
+                            {notification.title}
+                          </span>
+                        </div>
+                        <p style={{ margin: 0, color: '#64748B', fontSize: 12, lineHeight: 1.45 }}>
+                          {notification.message}
+                        </p>
+                        <span style={{ display: 'block', marginTop: 6, color: '#94A3B8', fontSize: 11 }}>
+                          {formatNotificationTime(notification.createdAt)}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteNotification(notification.id)}
+                        aria-label="알림 삭제"
+                        style={{
+                          width: 24,
+                          height: 24,
+                          border: 'none',
+                          borderRadius: 6,
+                          background: 'transparent',
+                          color: '#94A3B8',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* 프로필 */}
           <Link
