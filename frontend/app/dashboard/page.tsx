@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleChevronLeft, CircleChevronRight } from "lucide-react";
 import { useState, useMemo, useEffect } from "react";
 import { getMyCards, getMyTickets, getMyPosters } from "@/lib/api";
 import type { TicketResponse, PosterResponse } from "@/types";
@@ -47,6 +48,20 @@ function fullImageUrl(url: string): string {
   return url.startsWith("http") ? url : `${IMAGE_BASE}${url}`;
 }
 
+function formatDateKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function isDateInRange(dateStr: string, startDate?: string, endDate?: string) {
+  const start = (startDate || endDate || "").slice(0, 10);
+  const end = (endDate || startDate || "").slice(0, 10);
+  if (!dateStr || !start || !end) return false;
+
+  const rangeStart = start <= end ? start : end;
+  const rangeEnd = start <= end ? end : start;
+  return dateStr >= rangeStart && dateStr <= rangeEnd;
+}
+
 interface DeadlineCard {
   id: string;
   title: string;
@@ -75,11 +90,17 @@ const TYPE_COLORS: Record<
   BUSINESS_CARD: { color: "#15293D", bg: "#E8EDF3", label: "명함" },
 };
 
+function getWeekendColor(dayOfWeek: number) {
+  if (dayOfWeek === 0) return "#DC2626";
+  if (dayOfWeek === 6) return "#2563EB";
+  return "#333";
+}
+
 export default function DashboardPage() {
   const today = useMemo(() => new Date(), []);
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
-  const [selectedDate, setSelectedDate] = useState<number | null>(null);
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
   const [deadlineCards, setDeadlineCards] = useState<DeadlineCard[]>([]);
   const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>([]);
@@ -87,11 +108,20 @@ export default function DashboardPage() {
   const [totalCards, setTotalCards] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  const selectedDateKey = useMemo(() => {
-    if (selectedDate == null) return "";
-    const d = new Date(currentYear, currentMonth, selectedDate);
-    return d.toISOString().split("T")[0];
-  }, [currentYear, currentMonth, selectedDate]);
+  const selectedDate = useMemo(() => {
+    if (!selectedDateKey) return null;
+    const [year, month, day] = selectedDateKey.split("-").map(Number);
+    return { year, month: month - 1, day, toString: () => String(day) };
+  }, [selectedDateKey]);
+
+  const setSelectedDate = (date: null) => {
+    if (date === null) setSelectedDateKey(null);
+  };
+
+  const selectedDayInCurrentMonth =
+    selectedDate?.year === currentYear && selectedDate.month === currentMonth
+      ? selectedDate.day
+      : null;
 
   useEffect(() => {
     async function fetchData() {
@@ -150,8 +180,8 @@ export default function DashboardPage() {
       const todayStr = new Date().toISOString().split("T")[0];
       const todaySchedules = [
         ...tickets.filter((t) => t.departureDate === todayStr),
-        ...posters.filter(
-          (p) => p.eventStartDate === todayStr || p.eventEndDate === todayStr,
+        ...posters.filter((p) =>
+          isDateInRange(todayStr, p.eventStartDate, p.eventEndDate),
         ),
       ];
       setTodayCount(todaySchedules.length);
@@ -164,7 +194,7 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    async function updateSchedule() {
+    async function updateSchedule(dateKey: string) {
       const [ticketsRes, postersRes] = await Promise.all([
         getMyTickets(0, 100),
         getMyPosters(0, 100),
@@ -175,9 +205,9 @@ export default function DashboardPage() {
       const posters: PosterResponse[] = postersRes.success
         ? postersRes.data
         : [];
-      buildScheduleForDate(selectedDateKey, tickets, posters);
+      buildScheduleForDate(dateKey, tickets, posters);
     }
-    if (!isLoading && selectedDateKey) updateSchedule();
+    if (!isLoading && selectedDateKey) updateSchedule(selectedDateKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDateKey]);
 
@@ -199,7 +229,7 @@ export default function DashboardPage() {
       }
     }
     for (const p of posters) {
-      if (p.eventStartDate === dateStr || p.eventEndDate === dateStr) {
+      if (isDateInRange(dateStr, p.eventStartDate, p.eventEndDate)) {
         items.push({
           id: p.id,
           title: p.title || "이벤트",
@@ -239,6 +269,9 @@ export default function DashboardPage() {
     day === today.getDate() &&
     currentMonth === today.getMonth() &&
     currentYear === today.getFullYear();
+
+  const calendarContentWidth = selectedDate == null ? 1000 : 500;
+  const calendarRowGap = selectedDate == null ? 16 : 10;
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
@@ -571,7 +604,7 @@ export default function DashboardPage() {
             style={{
               borderRadius: 12,
               border: "1px solid #CBD5E1",
-              padding: selectedDate != null ? 24 : 64,
+              padding: selectedDate == null ? "40px 0 64px" : "20px 0 24px",
               background: "#FFFFFF",
               width: "100%",
               minHeight: selectedDate != null ? undefined : 420,
@@ -583,7 +616,10 @@ export default function DashboardPage() {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
-                marginBottom: 16,
+                width: calendarContentWidth,
+                maxWidth: "100%",
+                margin: "0 auto",
+                marginBottom: 10,
               }}
             >
               <button
@@ -598,7 +634,10 @@ export default function DashboardPage() {
                   fontWeight: 700,
                 }}
               >
-                ‹
+                <CircleChevronLeft
+                  size={selectedDate == null ? 32 : 24}
+                  strokeWidth={2}
+                />
               </button>
               <span
                 style={{
@@ -621,7 +660,10 @@ export default function DashboardPage() {
                   fontWeight: 700,
                 }}
               >
-                ›
+                <CircleChevronRight
+                  size={selectedDate == null ? 32 : 24}
+                  strokeWidth={2}
+                />
               </button>
             </div>
 
@@ -629,18 +671,26 @@ export default function DashboardPage() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(7, 1fr)",
-                gap: 16,
+                columnGap: 0,
+                rowGap: calendarRowGap,
+                width: "100%",
+                margin: selectedDate == null ? "0 0 28px" : "0 0 14px",
+                padding: selectedDate == null ? "64px 0 0 0" : "32px 0 0 0",
                 textAlign: "center",
                 justifyItems: "center",
-                marginBottom: 8,
               }}
             >
-              {["일", "월", "화", "수", "목", "금", "토"].map((d) => (
+              {["일", "월", "화", "수", "목", "금", "토"].map((d, index) => (
                 <span
                   key={d}
                   style={{
                     fontSize: selectedDate == null ? 20 : 12,
-                    color: "#999",
+                    color:
+                      index === 0
+                        ? "#DC2626"
+                        : index === 6
+                          ? "#2563EB"
+                          : "#999",
                     fontWeight: 500,
                   }}
                 >
@@ -653,17 +703,24 @@ export default function DashboardPage() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(7, 1fr)",
-                gap: 16,
+                columnGap: 0,
+                rowGap: calendarRowGap,
                 width: "100%",
+                margin: 0,
                 justifyItems: "center",
-                paddingTop: 12,
+                paddingTop: 6,
               }}
             >
-              {calendarDays.map((day, i) =>
-                day ? (
+              {calendarDays.map((day, i) => {
+                const dayOfWeek = i % 7;
+                return day ? (
                   <button
                     key={i}
-                    onClick={() => setSelectedDate(day)}
+                    onClick={() =>
+                      setSelectedDateKey(
+                        formatDateKey(currentYear, currentMonth, day),
+                      )
+                    }
                     style={{
                       width: selectedDate != null ? 36 : 72,
                       height: selectedDate != null ? 36 : 72,
@@ -671,10 +728,10 @@ export default function DashboardPage() {
                       border: "none",
                       background: isToday(day)
                         ? "#0077B6"
-                        : day === selectedDate
+                        : day === selectedDayInCurrentMonth
                           ? "#E8EDF3"
                           : "transparent",
-                      color: isToday(day) ? "#FFF" : "#333",
+                      color: isToday(day) ? "#FFF" : getWeekendColor(dayOfWeek),
                       fontSize: selectedDate != null ? 13 : 20,
                       fontWeight: isToday(day) ? 700 : 400,
                       cursor: "pointer",
@@ -693,8 +750,8 @@ export default function DashboardPage() {
                       background: "transparent",
                     }}
                   />
-                ),
-              )}
+                );
+              })}
             </div>
           </div>
 
@@ -721,7 +778,8 @@ export default function DashboardPage() {
                   <h3
                     style={{ fontSize: 15, fontWeight: 600, color: "#15293D" }}
                   >
-                    {currentYear}.{String(currentMonth + 1).padStart(2, "0")}.
+                    {selectedDate.year}.
+                    {String(selectedDate.month + 1).padStart(2, "0")}.
                     {String(selectedDate).padStart(2, "0")} 일정
                   </h3>
                   {scheduleItems.length > 0 && (
