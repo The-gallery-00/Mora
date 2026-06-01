@@ -5,10 +5,13 @@ import com.mora.dto.ticket.TicketResponse;
 import com.mora.dto.ticket.TicketRequest;
 import com.mora.entity.Ticket;
 import com.mora.repository.TicketRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -16,6 +19,7 @@ import java.util.*;
 
 @Service
 public class TicketService {
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
 
     // 연도 있는 패턴 (우선 시도)
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
@@ -326,9 +330,27 @@ public class TicketService {
 
     private String syncGoogleCalendar(UUID userId, Ticket ticket) {
         try {
-            googleCalendarService.syncTicketEvent(userId, ticket);
+            Optional<String> eventId = googleCalendarService.syncTicketEvent(userId, ticket);
+            if (eventId.isEmpty()
+                    && ticket != null
+                    && ticket.getDepartureDate() == null
+                    && googleCalendarService.getConnected(userId).isConnected()) {
+                return "구글 캘린더 동기화 건너뜀: 티켓 출발일을 인식하지 못했습니다.";
+            }
             return null;
+        } catch (RestClientResponseException e) {
+            log.warn("Google Calendar sync failed for userId={}, ticketId={}, status={}, body={}",
+                    userId,
+                    ticket == null ? null : ticket.getId(),
+                    e.getStatusCode(),
+                    e.getResponseBodyAsString(),
+                    e);
+            return "구글 캘린더 동기화 실패: Google API 응답 " + e.getStatusCode();
         } catch (RuntimeException e) {
+            log.warn("Google Calendar sync failed for userId={}, ticketId={}",
+                    userId,
+                    ticket == null ? null : ticket.getId(),
+                    e);
             return "구글 캘린더 동기화 실패: " + e.getMessage();
         }
     }
