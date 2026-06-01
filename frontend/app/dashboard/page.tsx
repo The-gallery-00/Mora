@@ -16,20 +16,40 @@ function formatToday(): string {
 
 function formatDateShort(dateStr: string): string {
   if (!dateStr) return ''
-  const d = new Date(dateStr)
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
+  const [year, month, dayValue] = dateStr.split('-').map(Number)
+  const d = new Date(year, month - 1, dayValue)
+  const m = String(month).padStart(2, '0')
+  const day = String(dayValue).padStart(2, '0')
   const weekdays = ['일', '월', '화', '수', '목', '금', '토']
   return `${m}.${day} (${weekdays[d.getDay()]})`
 }
 
 function getDDay(dateStr: string): number {
   if (!dateStr) return Infinity
-  const target = new Date(dateStr)
+  const target = parseLocalDate(dateStr)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   target.setHours(0, 0, 0, 0)
   return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function isDateInPosterRange(dateStr: string, poster: PosterResponse): boolean {
+  if (!poster.eventStartDate) return false
+  const start = poster.eventStartDate
+  const end = poster.eventEndDate || poster.eventStartDate
+  return start <= dateStr && dateStr <= end
 }
 
 function getImageFromParsedJson(json: string): string {
@@ -80,7 +100,7 @@ export default function DashboardPage() {
 
   const selectedDateKey = useMemo(() => {
     const d = new Date(currentYear, currentMonth, selectedDate)
-    return d.toISOString().split('T')[0]
+    return toLocalDateKey(d)
   }, [currentYear, currentMonth, selectedDate])
 
   useEffect(() => {
@@ -133,10 +153,10 @@ export default function DashboardPage() {
       deadlines.sort((a, b) => a.dDay - b.dDay)
       setDeadlineCards(deadlines)
 
-      const todayStr = new Date().toISOString().split('T')[0]
+      const todayStr = toLocalDateKey(new Date())
       const todaySchedules = [
         ...tickets.filter(t => t.departureDate === todayStr),
-        ...posters.filter(p => p.eventStartDate === todayStr || p.eventEndDate === todayStr),
+        ...posters.filter(p => isDateInPosterRange(todayStr, p)),
       ]
       setTodayCount(todaySchedules.length)
       buildScheduleForDate(todayStr, tickets, posters)
@@ -175,7 +195,7 @@ export default function DashboardPage() {
       }
     }
     for (const p of posters) {
-      if (p.eventStartDate === dateStr || p.eventEndDate === dateStr) {
+      if (isDateInPosterRange(dateStr, p)) {
         items.push({ id: p.id, title: p.title || '이벤트', type: 'POSTER', time: '', date: dateStr })
       }
     }
