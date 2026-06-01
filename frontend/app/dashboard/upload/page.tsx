@@ -51,6 +51,7 @@ export default function UploadPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState('')
   const [isSaved, setIsSaved] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -70,6 +71,7 @@ export default function UploadPage() {
   const handleFile = useCallback((f: File) => {
     setFile(f)
     setError(null)
+    setSaveMessage(null)
     setIsScanned(false)
     setIsSaved(false)
     setSelectedBlockIndex(null)
@@ -135,6 +137,7 @@ export default function UploadPage() {
   const handleSave = async () => {
     setIsSaving(true)
     setError(null)
+    setSaveMessage(null)
     const res = await saveCard(documentType, editFields, imageUrl,
       ocrScanResult?.rawTexts || [],
       ocrScanResult?.rawBlocks || [],
@@ -142,6 +145,7 @@ export default function UploadPage() {
     setIsSaving(false)
 
     if (res.success) {
+      setSaveMessage(res.message || null)
       setIsSaved(true)
     } else {
       setError(res.error || '저장 실패')
@@ -150,7 +154,7 @@ export default function UploadPage() {
 
   const handleReset = () => {
     setFile(null); setPreview(null); setIsScanned(false); setOcrScanResult(null)
-    setIsSaved(false); setError(null); setImageUrl('')
+    setIsSaved(false); setError(null); setSaveMessage(null); setImageUrl('')
     setDocumentType('ETC'); setConfidence(0)
     setEditFields({}); setFieldLabels({}); setSelectedBlockIndex(null)
   }
@@ -245,6 +249,15 @@ export default function UploadPage() {
           <p style={{ marginTop: 8, fontSize: 14, color: '#505050' }}>
             {TYPE_LABELS[documentType]} · {Object.values(editFields).filter(Boolean).slice(0, 2).join(' · ')}
           </p>
+          {saveMessage && (
+            <div style={{
+              margin: '20px auto 0', maxWidth: 520, padding: '12px 16px',
+              borderRadius: 10, background: '#FFFBEB', border: '1px solid #FDE68A',
+              color: '#92400E', fontSize: 13, lineHeight: 1.5, textAlign: 'left',
+            }}>
+              {saveMessage}
+            </div>
+          )}
           <button onClick={handleReset} style={{
             marginTop: 24, padding: '12px 32px', borderRadius: 10, border: 'none',
             background: '#0077B6', color: 'white', fontSize: 14, fontWeight: 600, cursor: 'pointer',

@@ -185,7 +185,7 @@ export async function saveCard(
       }),
     }).catch(() => {})
 
-    return { success: true, data: json.data }
+    return { success: true, data: json.data, message: json.message }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }
