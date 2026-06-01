@@ -54,33 +54,337 @@ os.environ["FLAGS_enable_pir_in_executor"] = "0"
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 
 from src.pipeline.extract_pipeline import BusinessCardPipeline
-from src.classifier.rule_based import classify_all_blocks, classify_all_blocks_for_type
+from src.classifier.rule_based import (
+    classify_all_blocks,
+    classify_all_blocks_for_type,
+    extract_clean_value,
+    EMAIL_PATTERN,
+    WEBSITE_PATTERN,
+    LINK_PATTERN,
+    MOBILE_PATTERN,
+    LANDLINE_PATTERN,
+    DATE_PATTERN,
+)
 from src.classifier.field_schema import DOCUMENT_FIELDS
 
 # "unknown" 라벨의 블록은 최종 결과에서 제외됨
 UNKNOWN_LABEL = "unknown"
 
+# ── 파서 전략 게이트 ──
+# OCR_PARSER_STRATEGY in {rule(기본), ml, hybrid}
+#   rule   : 기존 규칙기반 분류기만 사용 (현행 동작 보존).
+#   ml     : 학습된 트랜스포머(ml_parser)를 사용. 모델 없음/로드·추론 실패
+#            시 즉시 규칙기반으로 폴백한다.
+#   hybrid : ml 라벨을 기본으로 하되, 정규식이 신뢰높은 필드(전화/이메일/
+#            URL/금액 등)는 규칙으로 검증·보정·오버라이드한다. 실패 시 rule 폴백.
+# 어떤 경우에도 {classified_blocks, parsed} 반환 계약과 best-per-field +
+# DOCUMENT_FIELDS 매핑 로직은 불변이다. /scan 은 절대 500 을 내지 않는다.
+_VALID_STRATEGIES = ("rule", "ml", "hybrid")
+
+# hybrid 에서 "정규식이 확정적"인 필드 → 규칙(extract_clean_value/패턴)으로
+# 값 검증/보정하고, 규칙이 해당 라벨로 확정 매칭되면 라벨도 오버라이드한다.
+_REGEX_TRUSTED_FIELDS = frozenset({
+    "email", "website", "website_url", "contact_email",
+    "mobile_phone", "office_phone", "fax_number", "contact_phone",
+    "total_amount", "zip_code", "address",
+})
+
+# ML 이 'unknown' 으로 기권한 블록에 한해, 규칙이 키워드로 확신하는 의미필드
+# (회사/부서/직책)를 보충한다. ML 의 '확정' 라벨은 건드리지 않음(unknown 한정)
+# → 대학·기관 명함처럼 학습분포 밖(OOD)에서 ML 이 비는 칸을 규칙이 메움.
+_SEMANTIC_RULE_FALLBACK = frozenset({"company_name", "department", "job_title"})
+
+# 한 값이 OCR에서 여러 줄로 쪼개질 수 있는 "텍스트형" 필드.
+# (예: "국토교통부 창조센터"가 국토/교통부/창조센터 3블록으로 분리)
+# 이 필드들은 같은 필드 블록을 reading order(block_index)로 합쳐 한 값으로 만든다.
+# 전화/이메일/URL/날짜/시간/금액/우편번호/역명 등 "원자" 필드는 여기 없으며
+# 최고 confidence 한 줄만 사용한다(합치면 값이 깨지므로).
+_JOIN_FIELDS = frozenset({
+    # 명함
+    "company_name", "department", "job_title", "address",
+    # 포스터
+    "title", "organizer_name", "location",
+    # 영수증
+    "store_name",
+})
+
+
+def _get_strategy() -> str:
+    strategy = os.environ.get("OCR_PARSER_STRATEGY", "rule").strip().lower()
+    return strategy if strategy in _VALID_STRATEGIES else "rule"
+
+
+# ── 포스터 제목 bbox 휴리스틱 ──
+# 텍스트-only ML 은 폰트크기/위치를 못 본다(title F1=0.70 최약). 포스터 제목은
+# 시각적으로 "제일 큰 + 맨 위 글자"라는 강한 레이아웃 신호를 가지므로, bbox
+# (폰트크기 proxy=글자높이, 상단=min(y))로 제목 블록을 골라 ML 을 보강/오버라이드한다.
+#
+# ⚠️회귀안전 계약: bbox 가 없거나(None/[]) 유효한 후보가 없으면 None 을 반환해
+# no-op 한다. 비-OCR 경로(eval/합성)는 bbox=None 이라 휴리스틱이 그냥 꺼지고
+# 기존 ML 결과가 100% 유지된다(절대 안 깨짐).
+
+# 제목 후보에서 제외할 atomic(명확한 패턴) 필드 — 전화/이메일/URL/날짜.
+# 폰트가 크고 위에 있어도 이런 패턴이면 제목이 아니다(연락처/일시 헤더 오인 방지).
+_ATOMIC_TITLE_EXCLUDE = (
+    EMAIL_PATTERN, WEBSITE_PATTERN, LINK_PATTERN,
+    MOBILE_PATTERN, LANDLINE_PATTERN, DATE_PATTERN,
+)
+# atomic '제외' 임계: 패턴 매치 span 이 텍스트의 이 비율 이상일 때만 제외.
+# ('2026.03 신년 행사'처럼 날짜토큰 부수포함 제목이 DATE 부분매치로 통째 배제되는 것 방지)
+_ATOMIC_DOMINANCE = 0.8
+_TITLE_BIG_RATIO = 0.80   # 최대 글자높이의 80% 이상이면 '큰 글자' 동률군
+
+
+def _bbox_ys(bbox) -> list[float] | None:
+    """폴리곤 bbox([[x,y],...])에서 y 좌표들을 뽑는다. 형식 이상이면 None.
+
+    PaddleOCR rec_polys = 4점 폴리곤. 비-OCR 경로는 None/[] → None 반환(no-op).
+    """
+    if not bbox:
+        return None
+    ys = []
+    for pt in bbox:
+        # 각 점은 [x, y] (혹은 (x, y)). 길이<2 거나 숫자 아니면 무효 처리.
+        try:
+            ys.append(float(pt[1]))
+        except (TypeError, IndexError, ValueError):
+            return None
+    return ys or None
+
+
+def _is_atomic_field_block(text: str) -> bool:
+    """블록 '대부분'이 atomic 패턴(전화/이메일/URL/날짜)이면 True → 제목후보 제외.
+
+    매치 span 이 텍스트 길이의 _ATOMIC_DOMINANCE 이상일 때만 atomic 으로 본다.
+    제목에 부수적으로 섞인 날짜/도메인 토큰만으로는 제외하지 않는다.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True   # 빈 텍스트는 제목 후보 아님
+    for pat in _ATOMIC_TITLE_EXCLUDE:
+        m = pat.search(t)
+        if m and (m.end() - m.start()) >= _ATOMIC_DOMINANCE * len(t):
+            return True
+    return False
+
+
+def _pick_poster_title(blocks: list[dict]) -> int | None:
+    """포스터 제목 블록의 인덱스(blocks 리스트상 위치)를 bbox 휴리스틱으로 고른다.
+
+    선정 기준: "제일 큰 폰트(글자높이=max(y)-min(y)) + 상단(min(y) 작을수록 위)".
+      - 1순위: 글자높이 내림차순(큰 폰트 우선).
+      - 동률(근소차) 보정: 글자높이가 최대치의 일정 비율 이상인 후보들 중
+        가장 위(min(y) 최소)에 있는 블록을 택한다 → "크고 위"를 함께 만족.
+    제외: atomic 필드(전화/이메일/URL/날짜=명확한 패턴) 블록은 제목 후보 아님.
+
+    Args:
+        blocks: [{text, bbox, ...}] 리스트. bbox=폴리곤 또는 None/[].
+
+    Returns:
+        제목으로 고른 블록의 blocks 내 위치 인덱스(int). bbox 가 하나도 없거나
+        (비-OCR 경로) 유효 후보가 없으면 None(no-op → 기존 분류 유지).
+    """
+    if not blocks:
+        return None
+    # 세그먼트 감지: 같은 block_index 가 2회 이상 → 분할되어 bbox 공유 → 후보 제외
+    # (segment_text_blocks 가 원본 폴리곤을 복사 → 폰트크기 proxy 무력).
+    idx_counts: dict = {}
+    for b in blocks:
+        bi = b.get("block_index")
+        if bi is not None:
+            idx_counts[bi] = idx_counts.get(bi, 0) + 1
+
+    # (위치 i, 글자높이 h, 상단 top) 후보 수집. 세그먼트/bbox없음/atomic 이면 스킵.
+    candidates: list[tuple[int, float, float]] = []
+    for i, b in enumerate(blocks):
+        bi = b.get("block_index")
+        if bi is not None and idx_counts.get(bi, 0) > 1:
+            continue   # 세그먼트(bbox 공유) → 폰트크기 신호 무효 → 스킵
+        ys = _bbox_ys(b.get("bbox"))
+        if ys is None:
+            continue
+        if _is_atomic_field_block(b.get("text", "")):
+            continue
+        height = max(ys) - min(ys)
+        if height <= 0:
+            continue   # 퇴화 폴리곤(높이 0) 제외
+        candidates.append((i, height, min(ys)))
+
+    if not candidates:
+        return None   # bbox 전무(비-OCR) 또는 후보 전멸 → no-op
+
+    # 1) 제일 큰 폰트. 2) 큰 폰트끼리(최대높이의 _TITLE_BIG_RATIO 이상) 동률이면 더 위(top↑).
+    max_h = max(c[1] for c in candidates)
+    big = [c for c in candidates if c[1] >= max_h * _TITLE_BIG_RATIO]
+    best = min(big, key=lambda c: (c[2], -c[1], c[0]))
+    return best[0]
+
 
 class ParsingSkill:
-    """OCR 텍스트 블록을 명함 필드로 분류/파싱."""
+    """OCR 텍스트 블록을 문서종류별 필드로 분류/파싱.
+
+    전략(OCR_PARSER_STRATEGY)에 따라 규칙기반/ML/하이브리드 분류기를 선택하며,
+    ML 경로 실패 시 항상 규칙기반으로 폴백한다.
+    """
+
     def execute(self, text_blocks: list[dict], document_type: str = "BUSINESS_CARD") -> dict:
         if not text_blocks:
             return {"classified_blocks": [], "parsed": {}}
 
-        classified = classify_all_blocks_for_type(text_blocks, document_type)
+        classified = self._classify(text_blocks, document_type)
+        field_map = DOCUMENT_FIELDS.get(document_type, {})
+        parsed = self._aggregate(classified, field_map)
 
-        best = {}
+        return {"classified_blocks": classified, "parsed": parsed}
+
+    # ── 필드별 값 집계 (멀티라인 합치기 + 원자필드 최고conf) ──
+    @staticmethod
+    def _aggregate(classified: list[dict], field_map: dict) -> dict:
+        """분류된 블록을 필드별로 묶어 최종 값(parsed)을 만든다.
+
+        - _JOIN_FIELDS(회사/부서/주소/제목 등 여러 줄로 쪼개지는 값): 같은 필드
+          블록을 block_index(reading order)로 정렬해 공백으로 합친다. 동일 텍스트
+          중복은 제거. 예) 국토 + 교통부 + 창조센터 → "국토 교통부 창조센터".
+        - 그 외(전화/이메일/URL/날짜/금액/우편번호/역명 등 원자 필드): 최고
+          confidence 블록 한 줄만 사용(합치면 값이 깨짐).
+        """
+        from collections import defaultdict
+
+        groups = defaultdict(list)
         for block in classified:
             field = block["field"]
             if field == UNKNOWN_LABEL:
                 continue
-            if field not in best or block["confidence"] > best[field]["confidence"]:
-                best[field] = block
+            groups[field].append(block)
 
-        field_map = DOCUMENT_FIELDS.get(document_type, {})
-        parsed = {field_map.get(k, k): v["text"] for k, v in best.items()}
+        parsed = {}
+        for field, blocks in groups.items():
+            if field in _JOIN_FIELDS and len(blocks) > 1:
+                ordered = sorted(blocks, key=lambda b: b.get("block_index", 0))
+                parts = []
+                for b in ordered:
+                    t = (b.get("text") or "").strip()
+                    if t and (not parts or parts[-1] != t):  # 인접 중복 제거
+                        parts.append(t)
+                value = " ".join(parts)
+            else:
+                best = max(blocks, key=lambda b: b.get("confidence", 0.0))
+                value = best["text"]
+            # 최종 값 정제(전 전략 공통): 라벨/괄호/노이즈 제거. 전화/이메일/금액/날짜/장소.
+            # 정제 결과가 빈값(유효한 값 없음=라벨만/비전화 숫자 등)이면 필드를 누락한다.
+            # 상용 기준: 빈 칸이 'tel.', 라벨, 계좌번호 같은 garbage 보다 사람이 쓰기 적합.
+            value = (extract_clean_value(value, field) or "").strip()
+            if not value:
+                continue
+            parsed[field_map.get(field, field)] = value
+        return parsed
 
-        return {"classified_blocks": classified, "parsed": parsed}
+    # ── 전략 디스패치 + 폴백 ──
+    def _classify(self, text_blocks: list[dict], document_type: str) -> list[dict]:
+        strategy = _get_strategy()
+        if strategy == "rule":
+            return classify_all_blocks_for_type(text_blocks, document_type)
+
+        # ml / hybrid: ml_parser 를 lazy import (상단 강제 import 금지).
+        try:
+            from src.classifier.ml_parser import classify_blocks_ml
+            classified = classify_blocks_ml(text_blocks, document_type)
+        except Exception as e:  # noqa: BLE001 — 모델없음/로드·추론 실패 모두 흡수
+            print(f"[PARSER] strategy={strategy} ml failed -> rule fallback: {e!r}", flush=True)
+            return classify_all_blocks_for_type(text_blocks, document_type)
+
+        if strategy == "hybrid":
+            try:
+                classified = self._apply_hybrid_corrections(
+                    classified, text_blocks, document_type
+                )
+            except Exception as e:  # noqa: BLE001 — 보정 실패해도 ml 결과는 살린다
+                print(f"[PARSER] hybrid correction skipped: {e!r}", flush=True)
+
+        return classified
+
+    # ── hybrid: 정규식 신뢰필드 검증/보정 + 빈필드 규칙보충 ──
+    def _apply_hybrid_corrections(
+        self, ml_classified: list[dict], text_blocks: list[dict], document_type: str
+    ) -> list[dict]:
+        """
+        1) 정규식 신뢰필드(전화/이메일/URL/금액/우편번호)는 규칙이 확정적으로
+           매칭되는 라인이면 rule 라벨로 오버라이드하고 값도 규칙으로 정제.
+        2) ml 이 분류한 신뢰필드 라인의 값도 규칙 정제로 한 번 더 정돈.
+        3) ml 이 어떤 신뢰필드도 못 찾았는데 규칙은 찾은 경우(빈필드 보충),
+           규칙 라벨/값으로 채운다.
+        TICKET 복합분리는 ml_parser 가 이미 rule split 헬퍼를 재사용하므로 패스.
+        """
+        if document_type == "TICKET":
+            return ml_classified
+
+        allowed_internal = set(DOCUMENT_FIELDS.get(document_type, {}).keys())
+        rule_classified = classify_all_blocks_for_type(text_blocks, document_type)
+        # block_index -> 규칙 결과(라인당 대표 1개). 같은 인덱스 복수면 첫번째 유지.
+        rule_by_idx = {}
+        for r in rule_classified:
+            rule_by_idx.setdefault(r["block_index"], r)
+
+        ml_fields_present = {e["field"] for e in ml_classified}
+
+        for entry in ml_classified:
+            rule_entry = rule_by_idx.get(entry["block_index"])
+            if rule_entry is None:
+                continue
+            rule_field = rule_entry["field"]
+            # 규칙이 신뢰필드로 확정 매칭한 라인 → 라벨/값을 규칙으로 오버라이드
+            if (
+                rule_field in _REGEX_TRUSTED_FIELDS
+                and rule_field in allowed_internal
+                and entry["field"] != rule_field
+            ):
+                entry["field"] = rule_field
+                entry["text"] = rule_entry["text"]
+                continue
+            # ML 이 unknown 으로 기권 + 규칙이 키워드로 의미필드 확신 → 규칙 채택
+            # (대학명함 등 OOD 보완. ML 확정라벨은 위 분기서 이미 처리, 여기는 unknown 만)
+            if (
+                entry["field"] == "unknown"
+                and rule_field in _SEMANTIC_RULE_FALLBACK
+                and rule_field in allowed_internal
+            ):
+                entry["field"] = rule_field
+                entry["text"] = rule_entry["text"]
+                continue
+            # ml 과 규칙 라벨이 같고 신뢰필드면 값만 규칙 정제로 재확정
+            if entry["field"] == rule_field and entry["field"] in _REGEX_TRUSTED_FIELDS:
+                entry["text"] = extract_clean_value(rule_entry["text"], entry["field"])
+
+        # 빈필드 보충: ml 이 놓친 신뢰필드를 규칙이 찾았으면 추가
+        for r in rule_classified:
+            rf = r["field"]
+            if (
+                rf in _REGEX_TRUSTED_FIELDS
+                and rf in allowed_internal
+                and rf not in ml_fields_present
+            ):
+                ml_classified.append({
+                    "text": r["text"],
+                    "confidence": r.get("confidence", 0.0),
+                    "bbox": r.get("bbox"),
+                    "block_index": r["block_index"],
+                    "field": rf,
+                })
+                ml_fields_present.add(rf)
+
+        # ── POSTER 제목 bbox 휴리스틱 (보충 전용) ──
+        # ML 이 이미 title 을 분류했으면 휴리스틱은 개입하지 않는다. ML title 을 무조건
+        # bbox 로 오버라이드하면 슬로건(폰트>제목)이 흔한 포스터에서 맞춘 title 을
+        # 망친다(적대검증 치명이슈). ML 이 title 을 비웠을 때만 bbox 로 보충한다.
+        # bbox 없으면 _pick_poster_title 가 None → no-op(회귀안전).
+        if document_type == "POSTER":
+            has_ml_title = any(e.get("field") == "title" for e in ml_classified)
+            if not has_ml_title:
+                title_idx = _pick_poster_title(ml_classified)
+                if title_idx is not None:
+                    ml_classified[title_idx]["field"] = "title"
+
+        return ml_classified
 
 
 # ── Lazy 싱글톤 인스턴스 ──

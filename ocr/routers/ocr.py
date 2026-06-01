@@ -298,6 +298,7 @@ async def scan(file: UploadFile = File(...)):
         # Step 3: 텍스트 블록을 문서 종류에 맞게 파싱
         parsed_result = parsing_skill.execute(text_blocks, document_type=document_type)
         parsed = parsed_result["parsed"]
+        items = parsed_result.get("items", [])  # 영수증 품목 (RECEIPT 만)
         last_at = log_timing(request_id, "parsing_done", request_started_at, last_at)
 
         fields = {
@@ -321,6 +322,7 @@ async def scan(file: UploadFile = File(...)):
                 "type": document_type,
                 "confidence": round(confidence, 4),
                 "parsed": parsed,
+                "items": items,
                 "fields": fields,
                 "raw_blocks": text_blocks,
                 "image_url": f"/uploads/{document_type}/{img_name}",

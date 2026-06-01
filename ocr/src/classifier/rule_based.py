@@ -74,6 +74,10 @@ MOBILE_PATTERN = re.compile(r"01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}")
 # 일반 전화 / 팩스: 02-xxx-xxxx, 0xx-xxx-xxxx
 LANDLINE_PATTERN = re.compile(r"0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}")
 
+# 값 추출 전용(분류 아님): 괄호 지역번호 "(055)366-0762" 도 잡는 느슨한 전화 패턴.
+# extract_clean_value 에서 라벨/괄호가 섞인 원문에서 번호만 뽑을 때 사용.
+_PHONE_LOOSE = re.compile(r"\(?0\d{1,2}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}")
+
 # 팩스 키워드
 FAX_KEYWORDS = re.compile(r"(?i)(fax|팩스|f\s*[:.]|FAX\s*[:.)])")
 
@@ -94,6 +98,18 @@ TIME_PATTERN = re.compile(
 
 # URL 링크: http://, https://, www. 로 시작하는 주소
 LINK_PATTERN = re.compile(r"https?://\S+|www\.\S+", re.IGNORECASE)
+
+# 스킴/www 없는 맨도메인(명함에 흔함): "foo.co.kr", "company.com/about".
+# 알려진 TLD 로 끝나는 토큰만 URL 로 인정(정밀도). 이메일 로컬파트(@앞)는
+# (?<![@\w]) 룩비하인드로 제외. 이메일은 분류 1단계서 먼저 걸러짐.
+_URL_TLD = (r"(?:com|net|org|io|biz|info|dev|app|me|tv|edu|gov"
+            r"|co\.kr|ne\.kr|or\.kr|go\.kr|ac\.kr|re\.kr|pe\.kr|kr)")
+# 분류/추출에서 함께 쓰는 통합 URL 탐지(스킴/www/맨도메인 모두).
+WEBSITE_PATTERN = re.compile(
+    r"https?://\S+|www\.\S+|"
+    r"(?<![@\w])(?:[a-z0-9][a-z0-9\-]*\.)+" + _URL_TLD + r"\b(?:/[^\s]*)?",
+    re.IGNORECASE,
+)
 
 # 금액: "12,000원", "₩12,000" 등
 PRICE_PATTERN = re.compile(r"[\d,]+\s*원|₩\s*[\d,]+")
@@ -121,6 +137,7 @@ JOB_TITLE_KEYWORDS = [
     "대표", "사장", "부사장", "전무", "상무", "이사", "부장", "차장",
     "과장", "대리", "사원", "주임", "팀장", "실장", "본부장", "센터장",
     "매니저", "엔지니어", "디자이너", "개발자", "연구원", "교수", "박사",
+    "원장", "부원장", "회장", "지점장", "점장", "소장", "국장", "위원장",
     # 영어
     "CEO", "CTO", "CFO", "COO", "VP", "Director", "Manager", "Engineer",
     "Designer", "Developer", "Analyst", "Consultant", "President",
@@ -132,17 +149,20 @@ COMPANY_KEYWORDS = [
     # 한국어
     "주식회사", "(주)", "㈜", "(재)", "재단법인", "(사)", "사단법인",
     "협회", "재단", "기술원", "연구원", "진흥원", "공사", "공단",
+    "대학교", "대학원", "학교",   # 학술/교육기관(대학 명함)
     "회사", "그룹", "코퍼레이션", "테크", "랩",
     "솔루션", "시스템", "네트워크", "미디어", "엔터", "파트너스",
     # 영어
     "Inc", "Corp", "Ltd", "LLC", "Co.", "Company", "Group",
     "Technologies", "Tech", "Labs", "Solutions", "Systems",
     "Networks", "Media", "Entertainment", "Partners", "Global",
+    "University", "College", "Institute", "Univ",
 ]
 
 # 부서 키워드 — 텍스트 끝에 이 키워드가 오면 부서명으로 판별
 DEPARTMENT_KEYWORDS = [
     "부", "팀", "실", "센터", "본부", "사업부", "연구소", "지점",
+    "학부", "학과",   # 대학 조직(예: "디지털융합대학 컴퓨터학부")
     "파트", "그룹", "Division", "Team", "Department", "Dept",
 ]
 
@@ -158,6 +178,38 @@ ZIP_CODE_PATTERN = re.compile(r"^\d{5}$")
 
 # 주최/주관 키워드
 ORGANIZER_KEYWORDS = ["주최", "주관", "후원", "협찬", "organizer", "hosted by"]
+
+# 주최자 값 정제용 패턴 — 선두/인라인 라벨 + 구분자. entity 타입(시/재단/회사/사람)
+# 가정 없이 라벨 앵커로만 메인(주최) 식별. 접미 라벨명사(자/측/처/사)는 라벨로 함께 소비
+# ('주최자/주최측/주관사' 의 접미음절을 값으로 오인하지 않음). 경계가드로 '우주관광' 등 오발동 차단.
+_ORG_LABEL_SUFFIX = r"(?:자|측|처|사)?"
+_ORG_LABEL_CORE = (
+    r"(?:주최\s*[/／]\s*주관|주최|주관|후원|협찬)" + _ORG_LABEL_SUFFIX
+    + r"|(?:organizer|hosted\s*by)"
+)
+_ORG_LABEL_LEAD = re.compile(
+    r"^\s*(?:" + _ORG_LABEL_CORE + r")(?=[\s:：/／|·・,，]|$)\s*[:：/／|·・]?\s*",
+    re.IGNORECASE,
+)
+_ORG_LABEL_ONLY = re.compile(
+    r"^\s*(?:" + _ORG_LABEL_CORE + r")\s*$", re.IGNORECASE,
+)
+_ORG_INLINE_LABEL = re.compile(
+    r"(?<![가-힣])(?:주최|주관|후원|협찬)" + _ORG_LABEL_SUFFIX + r"\s*[:：]\s*"
+    + r"|(?<![A-Za-z])(?:organizer|hosted\s*by)\s*[:：]\s*",
+    re.IGNORECASE,
+)
+# 메인('주최:') 캡처 — 다음 인라인라벨/구분자(콤마·가운뎃점·파이프·' / ') 직전까지.
+# 공백 없는 슬래시('서울/경기')는 경계 아님 → org명 내부 슬래시 절단 안 함.
+_ORG_MAIN = re.compile(
+    r"(?<![가-힣])주최" + _ORG_LABEL_SUFFIX + r"\s*[:：]\s*(.+?)"
+    + r"(?=\s*(?:[,，·・|]|\s[/／]\s"
+    + r"|(?<![가-힣])(?:주관|후원|협찬)" + _ORG_LABEL_SUFFIX + r"\s*[:：]"
+    + r"|(?<![A-Za-z])(?:organizer|hosted\s*by)\s*[:：])|$)",
+    re.IGNORECASE,
+)
+_ORG_SPLIT = re.compile(r"\s*[,，·・|]\s*|\s+[/／]\s+")
+_ORG_BULLET = " \t·・|／/※▶►●*-—–>"
 
 # 장소 키워드
 LOCATION_KEYWORDS = ["장소", "위치", "곳", "at ", "venue", "홀", "센터", "회의실", "강당"]
@@ -238,8 +290,8 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
     if EMAIL_PATTERN.search(text_stripped):
         return "email"
 
-    # 2) 웹사이트 확인 — http/https/www 패턴
-    if LINK_PATTERN.search(text_stripped):
+    # 2) 웹사이트 확인 — http/https/www + 스킴없는 맨도메인(foo.co.kr)
+    if WEBSITE_PATTERN.search(text_stripped):
         return "website"
 
     # 3) 팩스 확인 — 팩스 키워드 + 전화번호 패턴이 동시에 존재
@@ -302,9 +354,12 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
         if KOREAN_SURNAME_SINGLE.match(name_no_space) or KOREAN_SURNAME_DOUBLE.match(name_no_space):
             return "person_name"
 
-    # 12) 영문 이름 추정 — 2~3 단어, 모두 알파벳, 각 단어 첫 글자 대문자
+    # 12) 영문 이름 추정 — 2~3 단어, 각 단어 첫 글자 대문자.
+    #     로마자 한국이름은 하이픈/마침표 포함 가능("Yong-Yeon","J.H.") → 제거 후 알파벳 검사.
     words = text_stripped.split()
-    if 2 <= len(words) <= 3 and all(w[0].isupper() and w.isalpha() for w in words):
+    if 2 <= len(words) <= 3 and all(
+        w[:1].isupper() and w.replace("-", "").replace(".", "").isalpha() for w in words
+    ):
         # 이미 한국어 이름이 분류된 블록이 있으면 english_name으로
         if all_blocks:
             has_korean_name = any(
@@ -319,30 +374,218 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
 
 
 def _normalize_phone(number: str) -> str:
-    """전화번호의 구분자(. 또는 공백)를 하이픈(-)으로 통일."""
-    return re.sub(r"[.\s]+(?=\d)", "-", number)
+    """전화번호 정규화: 산업표준 libphonenumber(E.164 검증)로 한국번호를
+    국가표준 형식(010-1234-5678)으로 통일. 라이브러리 부재/파싱 실패/무효번호는
+    기존 regex 정규화로 폴백(절대 깨지지 않음)."""
+    raw = number
+    try:
+        import phonenumbers
+        pn = phonenumbers.parse(number, "KR")
+        if phonenumbers.is_valid_number(pn):
+            return phonenumbers.format_number(
+                pn, phonenumbers.PhoneNumberFormat.NATIONAL)
+    except Exception:
+        pass
+    # 폴백: 괄호 지역번호 처리 + 구분자(. 공백)를 하이픈으로 통일.
+    number = raw.replace("(", "").replace(")", "-")   # "(055)366" → "055-366"
+    number = re.sub(r"[.\s]+(?=\d)", "-", number)         # 구분자 → 하이픈
+    number = re.sub(r"-{2,}", "-", number).strip("-")      # 중복 하이픈 정리
+    return number
+
+
+def _clean_amount(text: str) -> str:
+    """금액 칸 정제: 라벨/무관항목 제거 후 가장 큰 숫자를 'N원'으로. 숫자 없으면 ''."""
+    nums = re.findall(r"\d{1,3}(?:,\d{3})+|\d{4,}", text)
+    if not nums:
+        return ""   # 유효 금액 없음 → 드롭(예 라벨만/깨진 값)
+    n = max(int(s.replace(",", "")) for s in nums)
+    return f"{n:,}원"
+
+
+def _strip_date_label(s: str) -> str:
+    """날짜 칸 선두 라벨/장식 제거: [판매]/[구매]/출력일시:/일시:/~/· 등."""
+    s = s.strip()
+    s = re.sub(r"^[\[\(][^\]\)]{0,8}[\]\)]\s*", "", s)                       # [판 매]/(구매)
+    s = re.sub(r"(?i)^\s*(출력일시|판매일시|구매일시|거래일시|일시|날짜|기간|date)\s*[:：]?\s*", "", s)
+    s = s.lstrip("~·※▶►●*- \t")
+    return s.strip()
+
+
+def _to_iso_datetime(s: str) -> str:
+    """한국어/숫자 날짜(+시간) → ISO 8601(YYYY-MM-DD 또는 YYYY-MM-DDTHH:MM).
+    파싱 실패 시 '' 반환(호출부가 원문 폴백). 연도 없으면 올해로 보정(휴리스틱)."""
+    s = (s or "").strip()
+    # 날짜: (YYYY[년./-])? M[월./-] D[일]?  — 연도는 선택.
+    md = re.search(r"(?:(\d{4})\s*[년.\-/]\s*)?(\d{1,2})\s*[월.\-/]\s*(\d{1,2})\s*일?", s)
+    if not md:
+        return ""
+    y, mo, d = md.group(1), int(md.group(2)), int(md.group(3))
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return ""
+    if y is None:
+        import datetime as _dt
+        y = _dt.date.today().year     # 연도 없는 포스터 → 올해로 가정(휴리스틱)
+    else:
+        y = int(y)
+    iso = f"{y:04d}-{mo:02d}-{d:02d}"
+    # 시간: (오전|오후|AM|PM)? H[:시] MM? — [:시] 가 있어야 시간으로 인정(날짜오인 방지).
+    tm = re.search(r"(오전|오후|AM|PM)?\s*(\d{1,2})\s*[:시]\s*(\d{2})?\s*분?", s, re.I)
+    if tm:
+        ap = (tm.group(1) or "").lower()
+        h = int(tm.group(2))
+        mi = int(tm.group(3)) if tm.group(3) else 0
+        if 0 <= h <= 23 and 0 <= mi <= 59:
+            if ap in ("오후", "pm") and h < 12:
+                h += 12
+            if ap in ("오전", "am") and h == 12:
+                h = 0
+            iso += f"T{h:02d}:{mi:02d}"
+    return iso
+
+
+def _clean_event_date(text: str, role: str) -> str:
+    """행사 날짜 → ISO 8601 정규화. 범위(A~B)는 role(start/end)로 한쪽 선택하고,
+    종료일에 연도 없으면 시작연도를 상속. 파싱 실패 시 노이즈만 제거한 원문 반환."""
+    s = _strip_date_label(text)
+    s = re.sub(r"\([^)]*\)", "", s)                 # (금)(목)(토/Sat) 요일 괄호 제거
+    if "~" in s and role in ("start", "end"):
+        parts = re.split(r"\s*~\s*", s)
+        if role == "start":
+            s = parts[0]
+        else:
+            tail = parts[-1]
+            if not re.search(r"\d{4}", tail):       # 종료쪽 연도 없으면 시작연도 상속
+                ym = re.search(r"(\d{4})", parts[0])
+                if ym:                              # ISO 파서 연도패턴(\d{4}[구분자])에 맞게 '.' 결합
+                    tail = ym.group(1) + "." + tail.lstrip(" .-/")
+            s = tail
+    iso = _to_iso_datetime(s)
+    if iso:
+        return iso
+    # 폴백: ISO 파싱 불가 → 꼬리 노이즈만 제거한 원문
+    s = re.sub(r"\d+\s*일간|까지|부터", "", s)
+    return re.sub(r"\s+", " ", s).strip(" .~-")
+
+
+def _clean_purchase_date(text: str) -> str:
+    """영수증 구매일시 정제: 라벨 제거 + 날짜/시각 사이 구분자 복원."""
+    s = _strip_date_label(text)
+    s = re.sub(r"\([^)]*\)", "", s)                  # 요일 괄호 제거
+    s = re.sub(r"(\d)(\d{2}:\d{2})", r"\1 \2", s)    # '06-0221:13' → '06-02 21:13'
+    return re.sub(r"\s+", " ", s).strip(" .~-")
+
+
+def _clean_location(text: str) -> str:
+    """장소 칸 선두 글머리/라벨 제거: '·장소:'/'위치:'/'at ' 등."""
+    s = text.strip().lstrip("·※▶►●*-> \t")
+    s = re.sub(r"(?i)^\s*(장소|위치|venue|at)\s*[:：]?\s*", "", s)
+    return s.strip()
+
+
+def _strip_org_label(s: str) -> str:
+    """문자열 선두의 주최/주관/후원/협찬(+접미 자/측/처/사) 라벨 1회 제거 + 글머리 strip."""
+    return _ORG_LABEL_LEAD.sub("", s.strip()).strip(_ORG_BULLET)
+
+
+def _clean_organizer(text: str) -> str:
+    """주최자 칸 정제: 선두/인라인 라벨 제거 + 메인(주최) 1개 선택. entity 타입 무관.
+
+    1) '주최:'(자/측 포함) 인라인 라벨 있으면 그 값(다음 라벨/구분자 전까지). 공백없는
+       슬래시는 절단 안 함. 2) 메인 없으면 인라인라벨→경계 치환 후 구분자 분리, 첫 비라벨
+       항목. 3) 빈값 폴백: 선두라벨만 뗀 원문 → 그것도 비면 원문(데이터 소실 방지).
+    """
+    raw = text.strip()
+    if not raw:
+        return ""
+    lead_stripped = _strip_org_label(raw)
+    main = _ORG_MAIN.search(raw)
+    if main:
+        val = main.group(1).strip().strip(_ORG_BULLET).strip()
+        if val and not _ORG_LABEL_ONLY.match(val):
+            return val
+    cleaned = _ORG_INLINE_LABEL.sub(" / ", raw)
+    cleaned = _strip_org_label(cleaned)
+    parts = [_strip_org_label(p) for p in _ORG_SPLIT.split(cleaned)]
+    parts = [p for p in parts if p and not _ORG_LABEL_ONLY.match(p)]
+    if parts:
+        return parts[0]
+    fb = lead_stripped.strip(_ORG_BULLET).strip()
+    if fb and not _ORG_LABEL_ONLY.match(fb):
+        return fb
+    return raw
 
 
 def extract_clean_value(text: str, field: str) -> str:
     """분류된 필드에서 해당 값만 깨끗하게 추출 (키워드/노이즈 제거)."""
-    if field == "email":
-        # "E-mail.", "Email:", "E.", "e:" 등 접두사 키워드 제거 후 추출
-        cleaned = re.sub(r"(?i)^e[-.]?mail\s*[.:)]\s*", "", text.strip())
-        cleaned = re.sub(r"(?i)^e\s*[.:)]\s*", "", cleaned)
-        match = EMAIL_PATTERN.search(cleaned)
-        return match.group() if match else text
+    if field in ("email", "contact_email"):
+        # "E-mail." 처럼 라벨이 로컬파트 문자(letters/-/.)라 정규식에 흡수되는 것을
+        # 막기 위해 선두 'E-mail' 라벨을 먼저 제거한 뒤 추출.
+        # 괄호/한글 라벨("(0|메일: x@y)")은 로컬파트로 못 들어가 search 가 알아서 분리.
+        cleaned = re.sub(r"(?i)^\s*[\(\[]?\s*e[-.\s]?mail[.:)\-\s]*", "", text.strip())
+        # 이메일 라벨아이콘 'E'가 로컬파트 앞에 글루된 경우("Ewoojoo2021@") 제거.
+        # (명함의 E/T/F 아이콘 라벨에서 공백이 OCR로 소실된 케이스. email칸 한정.)
+        cleaned = re.sub(r"^E(?=[a-z])", "", cleaned)
+        match = EMAIL_PATTERN.search(cleaned) or EMAIL_PATTERN.search(text)
+        return match.group() if match else ""   # 유효 이메일 없으면 드롭(라벨 'E-mail'만 등)
     if field in ("mobile_phone", "office_phone", "contact_phone"):
-        match = MOBILE_PATTERN.search(text) or LANDLINE_PATTERN.search(text)
-        return _normalize_phone(match.group()) if match else text
+        match = (MOBILE_PATTERN.search(text) or LANDLINE_PATTERN.search(text)
+                 or _PHONE_LOOSE.search(text))
+        return _normalize_phone(match.group()) if match else ""   # 전화 패턴 없으면 드롭
     if field == "fax_number":
-        match = LANDLINE_PATTERN.search(text) or MOBILE_PATTERN.search(text)
-        return _normalize_phone(match.group()) if match else text
+        match = (LANDLINE_PATTERN.search(text) or MOBILE_PATTERN.search(text)
+                 or _PHONE_LOOSE.search(text))
+        return _normalize_phone(match.group()) if match else ""
     if field == "total_amount":
-        match = PRICE_PATTERN.search(text)
-        return match.group() if match else text
-    if field == "website" or field == "website_url":
-        match = LINK_PATTERN.search(text)
-        return match.group() if match else text
+        return _clean_amount(text)
+    if field == "purchase_date":
+        return _clean_purchase_date(text)
+    if field == "event_start_date":
+        return _clean_event_date(text, "start")
+    if field == "event_end_date":
+        return _clean_event_date(text, "end")
+    if field == "location":
+        return _clean_location(text)
+    if field == "organizer_name":
+        return _clean_organizer(text)
+    if field == "store_name":
+        # 어긋난 괄호 '[주)' → '(주)' 정도만 정돈(상호명 자체는 보존).
+        return text.strip().replace("[주)", "(주)").replace("(주]", "(주)")
+    if field == "job_title":
+        t = text.strip()
+        # 짧은 비한글 노이즈("FP" 등) 드롭: 한/영 직책키워드 어디에도 없으면 의심.
+        if re.fullmatch(r"[A-Za-z]{1,3}", t) and not any(t.lower() == k.lower() for k in JOB_TITLE_KEYWORDS):
+            return ""
+        return t
+    if field == "address":
+        t = text.strip()
+        # 선두 우편번호(5자리) 분리: "38541경상북도…" → 주소값에서 떼어냄
+        # (zip_code 는 별도 필드. 붙은 zip 이 주소 앞에 남으면 도로명주소 정규화 깨짐).
+        t = re.sub(r"^\s*\d{5}\s*[,]?\s*", "", t)
+        # 주소 마커(시/구/동/로/길…)가 2개 미만이고 숫자도 없으면 불완전 조각
+        # ("덕암"=회사조각, "화랑로"=도로명만) → 드롭(빈칸 > 주소로 못 쓸 단편).
+        if len(ADDRESS_PATTERN.findall(t)) >= 2 or re.search(r"\d", t):
+            return t
+        return ""
+    if field == "english_name":
+        # 슬로건/태그라인("SINCE 2001","2026") 방지: 숫자 포함이면 이름 아님 → 드롭.
+        return "" if re.search(r"\d", text) else text.strip()
+    if field in ("website", "website_url"):
+        match = WEBSITE_PATTERN.search(text)
+        if not match:
+            return ""
+        # \S+ 가 후행 닫는괄호/한글/꼬리("kr)를")까지 삼킴 → 절단.
+        url = re.sub(r"[)\]\}>」』】가-힣].*$", "", match.group()).rstrip(".,;")
+        url = re.sub(r"^(https?):/(?!/)", r"\1://", url)   # 'http:/' → 'http://' 복원
+        # 유효 TLD 없는 깨진 URL("www.kistiLre")은 드롭(빈칸 > 접속불가 링크).
+        if not re.search(r"\.(com|co|kr|net|org|io|ac|go|or|edu|biz|info|dev|app)\b", url, re.I):
+            return ""
+        # 스킴 없으면 https:// 보정(명함의 www./맨도메인). 호스트(스킴+도메인) 소문자.
+        if not re.match(r"(?i)^https?://", url):
+            url = "https://" + url
+        m2 = re.match(r"(?i)^(https?://)([^/]+)(.*)$", url)
+        if m2:
+            url = m2.group(1).lower() + m2.group(2).lower() + m2.group(3)
+        return url
     # 티켓: 교통수단은 정규화된 이름으로 반환
     if field == "transport_type":
         upper = text.upper()
@@ -350,12 +593,28 @@ def extract_clean_value(text: str, field: str) -> str:
             if kw.upper() in upper:
                 return normalized
         return text.strip()
-    # 티켓 필드: "라벨 : 값" 패턴에서 값만 추출
-    _TICKET_FIELDS = (
-        "departure_location", "departure_date",
-        "departure_time", "arrival_location", "arrival_date", "arrival_time",
-    )
-    if field in _TICKET_FIELDS:
+    # 티켓 시각: HH:MM 만 추출. (라벨:값 정규식이 "21:00"의 콜론을 라벨구분자로
+    # 오인해 분 "00"만 남기던 버그 방지.)
+    if field in ("departure_time", "arrival_time"):
+        m = re.search(r"\d{1,2}\s*:\s*\d{2}", text)
+        if m:
+            return re.sub(r"\s+", "", m.group())
+        m2 = re.search(r"(?:오전|오후)?\s*\d{1,2}\s*시(?:\s*\d{1,2}\s*분)?", text)
+        return m2.group().strip() if m2 else ""
+    # 티켓 날짜: 실제 날짜만 채택. 표번호 "NO. 19-672030"(월19 비현실)은 드롭.
+    if field in ("departure_date", "arrival_date"):
+        # 1) 4자리 연도 포함 형식 우선(YYYY.MM.DD / YYYY년 MM월 DD일)
+        m = re.search(r"\d{4}\s*[년.\-/]\s*\d{1,2}\s*[월.\-/]\s*\d{1,2}\s*일?", text)
+        if m:
+            return re.sub(r"\s+", "", m.group())
+        # 2) MM.DD / MM월 DD일 — 단 월≤12, 일≤31 인 현실 범위만(일련번호 배제)
+        for mm in re.finditer(r"(\d{1,2})\s*[월/.\-]\s*(\d{1,2})\s*일?", text):
+            mo, da = int(mm.group(1)), int(mm.group(2))
+            if 1 <= mo <= 12 and 1 <= da <= 31:
+                return re.sub(r"\s+", "", mm.group())
+        return ""
+    # 티켓 위치: "라벨 : 값" 패턴에서 값만 추출
+    if field in ("departure_location", "arrival_location"):
         label_match = re.match(r"^[\-▶►●·※\[\]\s]*(.+?)\s*[:：]\s*(.+)$", text.strip())
         if label_match:
             return label_match.group(2).strip()
@@ -375,90 +634,328 @@ def extract_clean_value(text: str, field: str) -> str:
     return text
 
 
-def _split_multi_pattern_blocks(text_blocks: list[dict]) -> list[dict]:
+# ════════════════════════════════════════════
+# 공유 세그멘터 — "한 줄에 두 필드" 혼합 블록 분할
+# ════════════════════════════════════════════
+#
+# [목적]
+# "강미경 010.6498.5121"(person_name+mobile_phone) 처럼 한 OCR 라인에
+# 이름/회사 등 비패턴 텍스트 + 전화/이메일/URL 패턴이 섞인 블록을,
+# 분류기에 넘기기 전에 두 조각으로 쪼개는 공유 분할기.
+#
+# [원칙] 세그멘터는 '분할'만 한다. 무슨 필드인지 라벨링은 분류기/모델 몫.
+#
+# [두 형태 — 같은 코어(_segment_core)를 공유]
+#   (a) segment_lines(list[str]) -> list[str]
+#         각 원본 라인을 0~N개 세그먼트 문자열로 펼침(순서보존).
+#         build_dataset / gold_scaffold(문자열 라인 리스트)용.
+#   (b) segment_text_blocks(list[dict]) -> list[dict]
+#         text/confidence/bbox/block_index 보존. 한 블록이 여러 세그먼트로
+#         늘면 동일 block_index 유지(기존 _split 관행). rule/ml 런타임용.
+#
+# 기존 _split_multi_pattern_blocks 는 segment_text_blocks 의 별칭으로 보존.
+
+# 전화 → 이메일/URL 순으로 매칭(전화번호를 먼저 확정해야 이메일 패턴이
+# 전화 숫자를 로컬파트로 삼키는 것을 방지). 코어/별칭 모두 재사용.
+_PHONE_PATTERNS = [MOBILE_PATTERN, LANDLINE_PATTERN]
+_OTHER_PATTERNS = [EMAIL_PATTERN, LINK_PATTERN]
+
+# 확장 라벨 가드 — 기존 PHONE_KEYWORDS/FAX_KEYWORDS 가 못 잡는
+# 단일/공백분리/한글 라벨(예: "H P", "M ", "T ", "F ", "E-mail.", 한글라벨)을
+# 보강. prefix 가 '오직 라벨키워드(+구두점/공백)만' 으로 끝날 때만 매치.
+SEGMENT_LABEL_GUARD = re.compile(
+    r"(?i)^\s*(?:"
+    r"(?:h|c|m)\s*\.?\s*p\.?"  # H P / H.P / HP / C.P / CP / M.P / MP (모바일 라벨)
+    r"|e[-.\s]?mail\.?"        # E-mail. / Email / E mail
+    r"|mobile|phone|tel|fax"   # 풀워드
+    r"|[mtfeh]"                # 단일문자 라벨 M/T/F/E/H
+    r"|에이치피|휴대폰|핸드폰|전화|팩스|이메일"  # 한글 라벨
+    r")\s*[:.\-]?\s*$"
+)
+
+
+def _is_meaningful_nonpattern(s: str) -> bool:
+    """비패턴 조각이 '의미있는 텍스트'(이름/회사/주소조각)인지 판정.
+
+    공백/구두점/구분자(-,·,|,/,:,.,(),쉼표)를 제거한 알맹이가 2자 이상이면 True.
+    → 단독 '|','-','·',',', 1글자 '0' 등은 버림(False).
     """
-    하나의 블록에 여러 종류의 정보(전화+팩스, 팩스+이메일 등)가
-    합쳐진 경우 각각 별도 블록으로 분리.
+    if not s:
+        return False
+    core = re.sub(r"[\s\-·|/:.,()]+", "", s.strip())
+    return len(core) >= 2
+
+
+# 패턴 바로 앞에 붙는 trailing 라벨토큰(공백/구두점 제외) 매칭용.
+# 예: '동793)T.' 의 끝 'T.', '강미경 Mobile.' 의 끝 'Mobile.', 'HP.' 등.
+_TRAILING_LABEL = re.compile(
+    r"(?i)(?:"
+    r"(?:h|c|m)\s*\.?\s*p\.?"  # H P / H.P / HP / C.P / CP / M.P / MP (모바일 라벨)
+    r"|e[-.\s]?mail\.?"        # E-mail.
+    r"|mobile|phone|tel|fax"   # 풀워드
+    r"|에이치피|휴대폰|핸드폰|전화|팩스|이메일"  # 한글 라벨
+    r"|(?<![A-Za-z가-힣])[mtfeh]"  # 단일문자 라벨(앞이 영문/한글이 아닐 때만)
+    r")\s*[:.\-]?\s*$"
+)
+
+
+def _is_label_keyword(prefix: str) -> bool:
+    """패턴 앞/뒤 텍스트가 전화/팩스/이메일 '라벨'로 끝나면 True(=분할 금지).
+
+    1) 확장 라벨 가드 SEGMENT_LABEL_GUARD: prefix 전체가 라벨키워드(+구두점)뿐.
+    2) trailing 라벨토큰: prefix 가 라벨(T./Mobile./HP. 등)로 '끝나는' 경우.
+       → '동793)T.'(주소+라벨), '강미경 Mobile.' 처럼 라벨이 패턴 바로 앞에
+         붙어있으면 그 라벨은 패턴에 귀속(앞 알맹이는 호출부에서 별도 처리).
+    3) 기존 PHONE_KEYWORDS/FAX_KEYWORDS 재사용(요구사항 충족).
+    """
+    s = prefix.strip()
+    if not s:
+        return False
+    if SEGMENT_LABEL_GUARD.match(s):
+        return True
+    if _TRAILING_LABEL.search(s):
+        return True
+    if PHONE_KEYWORDS.search(s) or FAX_KEYWORDS.search(s):
+        residue = PHONE_KEYWORDS.sub("", s)
+        residue = FAX_KEYWORDS.sub("", residue)
+        if not _is_meaningful_nonpattern(residue):
+            return True
+    return False
+
+
+# 공백분리 한글 음절 이름꼴: "최 용 연", "이 응 환" (2~4 음절, 음절 사이 공백).
+# ⚠️'음절 사이 공백'이 핵심 가드 — "전자"/"화학"/"그룹"/"솔루션즈" 같은 붙은
+#   한글(회사/내용어)은 내부 공백이 없어 매칭 안 됨 → 오분할 방지.
+_SPACED_HANGUL_NAME = r"[가-힣](?:\s+[가-힣]){1,3}"
+# 로마자명꼴: 각 토큰 첫 글자 대문자(+하이픈 허용), 숫자 없음, 1~4토큰.
+#   "Choi Yong-Yeon", "Hong Gil-Dong", "Choi".
+_ROMAN_NAME = r"[A-Z][A-Za-z]*(?:-[A-Za-z]+)*(?:\s+[A-Z][A-Za-z]*(?:-[A-Za-z]+)*){0,3}"
+
+_NAME_HANGUL_LATIN = re.compile(r"^(" + _SPACED_HANGUL_NAME + r")\s+(" + _ROMAN_NAME + r")$")
+_NAME_LATIN_HANGUL = re.compile(r"^(" + _ROMAN_NAME + r")\s+(" + _SPACED_HANGUL_NAME + r")$")
+
+
+def _split_name_script(text: str) -> list[str]:
+    """"최 용 연 Choi Yong-Yeon" 류(공백분리 한글이름 + 로마자명)만 두 조각으로 분리.
+
+    전화/이메일/URL 패턴이 없는 라인에만 적용된다(_segment_core 의 무패턴 분기).
+    한글측이 '공백분리 음절 이름꼴'일 때만 발동해 회사명/직책/주소/내용어의
+    한글+로마자 혼합(예 "CJ그룹","LG화학","Stable Diffusion","ICT 융합")은 건드리지 않는다.
+    분리 불가 시 [text] 그대로 반환.
+    """
+    s = text.strip()
+    m = _NAME_HANGUL_LATIN.match(s) or _NAME_LATIN_HANGUL.match(s)
+    if m:
+        a, b = m.group(1).strip(), m.group(2).strip()
+        if a and b:
+            return [a, b]
+    return [text]
+
+
+# 한글 직책 키워드(이름 앞에 붙는 "영업이사 권 오 창" 분리용)
+_JOB_KW_RE = re.compile(
+    "(" + "|".join(re.escape(k) for k in JOB_TITLE_KEYWORDS if re.search(r"[가-힣]", k)) + ")"
+)
+
+
+def _split_title_name(text: str) -> list[str]:
+    """"영업이사 권 오 창"/"팀장 한 명 화" 류(직책 + 공백분리 한글이름)를 분리.
+
+    suffix 가 '공백분리 한글 음절 이름꼴'일 때만 발동(강한 이름 신호) → 직책 자체
+    ("울산지사 부장")나 일반 텍스트는 건드리지 않는다. head 가 직책키워드를 포함하고
+    name 측에는 직책키워드가 없을 때만 분리.
+    """
+    s = text.strip()
+    last = None
+    for m in _JOB_KW_RE.finditer(s):
+        last = m
+    if not last:
+        return [text]
+    head, tail = s[:last.end()].strip(), s[last.end():].strip()
+    tail_ns = tail.replace(" ", "")
+    # tail 이 깔끔한 한글 이름(2~4음절)이고 직책키워드 미포함일 때만 분리.
+    if head and 2 <= len(tail_ns) <= 4 and re.fullmatch(r"[가-힣]{2,4}", tail_ns) \
+            and not _JOB_KW_RE.search(tail_ns):
+        return [head, tail]
+    return [text]
+
+
+def _segment_core(text: str) -> list[str]:
+    """한 줄(text)을 0~N개 세그먼트 문자열로 분할. 라벨링은 안 함.
+
+    기존 _split_multi_pattern_blocks 의 패턴매칭/마스킹 로직을 그대로 흡수하고,
+    '패턴 1개 + 의미있는 비패턴 접두/접미' 분리를 추가한다.
+    - filtered>=2(다중패턴): 기존 매치경계 분할을 100% 보존(회귀금지).
+      단 i==0 의 prefix 에는 NEW 단일패턴 규칙(이름 분리)을 동일 적용.
+    - filtered==1(단일패턴): NEW. 패턴 앞/뒤 비키워드 의미텍스트를 별도 분리.
+    """
+    text = text.strip()
+    if not text:
+        return []
+
+    # Step 1: 전화번호 매치를 먼저 확정(겹침 제거)
+    phone_matches = []
+    for pattern in _PHONE_PATTERNS:
+        for m in pattern.finditer(text):
+            phone_matches.append((m.start(), m.end()))
+    phone_matches.sort(key=lambda x: x[0])
+    phone_filtered = []
+    for start, end in phone_matches:
+        if not phone_filtered or start >= phone_filtered[-1][1]:
+            phone_filtered.append((start, end))
+
+    # Step 2: 전화 영역 마스킹 후 이메일/URL 매칭
+    masked = list(text)
+    for ps, pe in phone_filtered:
+        for i in range(ps, pe):
+            masked[i] = "\x00"
+    masked_text = "".join(masked)
+
+    other_matches = []
+    for pattern in _OTHER_PATTERNS:
+        for m in pattern.finditer(masked_text):
+            other_matches.append((m.start(), m.end()))
+
+    # Step 3: 전체 매치 합치기(start 정렬 + 비겹침)
+    all_matches = phone_filtered + other_matches
+    all_matches.sort(key=lambda x: x[0])
+    filtered = []
+    for start, end in all_matches:
+        if not filtered or start >= filtered[-1][1]:
+            filtered.append((start, end))
+
+    # 패턴(전화/이메일/URL)이 하나도 없으면:
+    # 공백분리 한글이름 + 로마자명("최 용 연 Choi Yong-Yeon") 또는
+    # 직책 + 공백분리 한글이름("영업이사 권 오 창")만 좁게 분리. 그 외는 원본 그대로.
+    if len(filtered) == 0:
+        segs = _split_name_script(text)
+        if len(segs) == 1:
+            segs = _split_title_name(text)
+        return segs
+
+    def _emit_prefix(prefix: str, segs: list):
+        """패턴 앞 prefix 를 NEW 규칙으로 처리.
+
+        - 의미텍스트 & 비라벨 → 별도 세그먼트로 분리(이름/회사). 패턴엔 안 붙임.
+        - 라벨키워드(가드ON) → 패턴에 그대로 붙여둠(예 'Mobile.','T.','동793)T.').
+        - 그 외(순수 구두점/공백 등 무의미) → 버림(예 '· ','  '). 패턴엔 안 붙임.
+        """
+        if _is_label_keyword(prefix):
+            return prefix   # 라벨 → 패턴에 귀속
+        if _is_meaningful_nonpattern(prefix):
+            p = prefix.strip()
+            if p:
+                segs.append(p)
+        return ""           # 분리했거나(이름) 무의미(구두점) → 패턴엔 안 붙임
+
+    segments: list[str] = []
+    n = len(filtered)
+    for i, (start, end) in enumerate(filtered):
+        if i == 0:
+            prefix = text[:start]
+        else:
+            prefix = text[filtered[i - 1][1]:start]
+        suffix = text[end:] if i == n - 1 else ""
+
+        if n >= 2:
+            # 다중패턴: 매치경계 분할 100% 보존.
+            # 단 i==0 prefix(=맨 앞 이름) 에만 NEW 분리 규칙 적용.
+            if i == 0:
+                prefix = _emit_prefix(prefix, segments)
+            seg = (prefix + text[start:end] + suffix).strip()
+            if seg:
+                segments.append(seg)
+        else:
+            # 단일패턴(NEW): 접두/접미 의미텍스트 분리.
+            # ⚠️경계 가드(데이터손상 회귀 방지): 패턴 매치가 더 큰 영숫자 토큰의
+            # 부분문자열(바코드/계좌/거래번호/AID 등 긴 숫자토큰)이면 분리 금지.
+            #   - 매치 시작 직전 문자가 영숫자([0-9A-Za-z]) → prefix 가 토큰의 일부
+            #   - 매치 종료 직후 문자가 영숫자          → suffix 가 토큰의 일부
+            # 정상('강미경 010..','(주)린텍 010..')은 패턴 앞이 공백/한글이라 무영향.
+            prefix_attached = bool(prefix) and prefix[-1:].isalnum()
+            suffix_attached = bool(suffix) and suffix[:1].isalnum()
+            if prefix_attached or suffix_attached:
+                # 더 큰 토큰의 부분매치 → 분할하지 않고 원본 라인 그대로 유지.
+                return [text]
+            prefix = _emit_prefix(prefix, segments)
+            # 접미(suffix)도 동일 규칙 — 패턴 뒤 비키워드 의미텍스트면 별도 분리
+            tail = ""
+            if suffix and _is_meaningful_nonpattern(suffix) and not _is_label_keyword(suffix):
+                tail = suffix.strip()
+                suffix = ""
+            seg = (prefix + text[start:end] + suffix).strip()
+            if seg:
+                segments.append(seg)
+            if tail:
+                segments.append(tail)
+
+    # 정제: 패턴 미포함 순수-비패턴 조각(2자 미만/순수구두점)은 버림.
+    # 패턴을 포함한 세그먼트는 길이무관 항상 유지.
+    cleaned = []
+    for seg in segments:
+        s = seg.strip()
+        if not s:
+            continue
+        has_pattern = (
+            MOBILE_PATTERN.search(s) or LANDLINE_PATTERN.search(s)
+            or EMAIL_PATTERN.search(s) or LINK_PATTERN.search(s)
+        )
+        if has_pattern or _is_meaningful_nonpattern(s):
+            cleaned.append(s)
+
+    # 모두 버려졌으면 원본 폴백(완전소실 방지)
+    return cleaned if cleaned else [text]
+
+
+def segment_lines(lines: list[str]) -> list[str]:
+    """형태(a): 문자열 라인 리스트를 분할해 펼침(순서보존).
+
+    한 줄이 1개 세그먼트면 그대로, N개면 펼친다. 빈 줄은 원본 유지(인덱스 보존).
+    build_dataset / gold_scaffold(라인 리스트, block_index 개념 없음)용.
+    """
+    out: list[str] = []
+    for ln in lines:
+        s = (ln or "").strip()
+        if not s:
+            out.append(ln)
+            continue
+        segs = _segment_core(s)
+        out.extend(segs if segs else [s])
+    return out
+
+
+def segment_text_blocks(text_blocks: list[dict]) -> list[dict]:
+    """형태(b): dict 블록을 분할(text/confidence/bbox/block_index 보존).
+
+    한 블록이 여러 세그먼트로 늘면 동일 block_index 유지(기존 _split 관행).
+    세그먼트가 0~1개면 원본 블록을 그대로 통과(무변경).
 
     예:
+      "강미경 010.6498.5121" → ["강미경", "010.6498.5121"]
       "F.053-813-1212E.ukneeon@naver.com"
         → ["F.053-813-1212", "E.ukneeon@naver.com"]
-      "T.053-216-1613 HP.010-3051-5765"
-        → ["T.053-216-1613", "HP.010-3051-5765"]
-      "Fax 053-289-4021Mobile 010-5140-3662"
-        → ["Fax 053-289-4021", "Mobile 010-5140-3662"]
+      "Mobile.010.4965.4540" → ["Mobile.010.4965.4540"] (라벨 가드)
     """
-    # 전화번호 → 이메일/URL 순서로 매칭 (전화번호를 먼저 확정해야
-    # 이메일 패턴이 전화번호 숫자를 로컬파트로 삼키는 것을 방지)
-    _PHONE_PATTERNS = [MOBILE_PATTERN, LANDLINE_PATTERN]
-    _OTHER_PATTERNS = [EMAIL_PATTERN, LINK_PATTERN]
-
     expanded = []
     for block in text_blocks:
-        text = block["text"].strip()
-
-        # Step 1: 전화번호 매치를 먼저 확정
-        phone_matches = []
-        for pattern in _PHONE_PATTERNS:
-            for m in pattern.finditer(text):
-                phone_matches.append((m.start(), m.end()))
-
-        # 겹치는 전화번호 매치 제거
-        phone_matches.sort(key=lambda x: x[0])
-        phone_filtered = []
-        for start, end in phone_matches:
-            if not phone_filtered or start >= phone_filtered[-1][1]:
-                phone_filtered.append((start, end))
-
-        # Step 2: 전화번호 영역을 마스킹한 텍스트에서 이메일/URL 매칭
-        # (전화번호 숫자가 이메일 로컬파트로 잡히는 것을 방지)
-        masked = list(text)
-        for ps, pe in phone_filtered:
-            for i in range(ps, pe):
-                masked[i] = '\x00'
-        masked_text = ''.join(masked)
-
-        other_matches = []
-        for pattern in _OTHER_PATTERNS:
-            for m in pattern.finditer(masked_text):
-                other_matches.append((m.start(), m.end()))
-
-        # 전체 매치 합치기
-        all_matches = phone_filtered + other_matches
-        all_matches.sort(key=lambda x: x[0])
-        filtered = []
-        for start, end in all_matches:
-            if not filtered or start >= filtered[-1][1]:
-                filtered.append((start, end))
-
-        # 패턴이 2개 이상이면 분리
-        if len(filtered) >= 2:
-            segments = []
-            for i, (start, end) in enumerate(filtered):
-                # 이 매치 앞의 접두사 텍스트 (키워드 라벨)를 포함
-                if i == 0:
-                    prefix = text[:start]
-                else:
-                    prefix = text[filtered[i - 1][1]:start]
-                # 마지막 매치이면 뒤에 남은 텍스트도 포함
-                if i == len(filtered) - 1:
-                    suffix = text[end:]
-                else:
-                    suffix = ""
-                segment_text = (prefix + text[start:end] + suffix).strip()
-                if segment_text:
-                    segments.append(segment_text)
-
-            for seg in segments:
-                expanded.append({
-                    "text": seg,
-                    "confidence": block.get("confidence", 0.0),
-                    "bbox": block.get("bbox"),
-                    "block_index": block["block_index"],
-                })
-        else:
+        s = (block.get("text") or "").strip()
+        segs = _segment_core(s) if s else []
+        if len(segs) <= 1:
             expanded.append(block)
+            continue
+        for seg in segs:
+            expanded.append({
+                "text": seg,
+                "confidence": block.get("confidence", 0.0),
+                "bbox": block.get("bbox"),
+                "block_index": block["block_index"],
+            })
     return expanded
+
+
+# 기존 호출부 호환: _split_multi_pattern_blocks 는 segment_text_blocks 의 별칭.
+# classify_all_blocks 의 호출부는 무수정으로 새 분할 로직(단일패턴 분리 포함) 흡수.
+_split_multi_pattern_blocks = segment_text_blocks
 
 
 # ════════════════════════════════════════════
@@ -855,8 +1352,9 @@ def classify_all_blocks(text_blocks: list[dict]) -> list[dict]:
     명함 전용. 전체 텍스트 블록을 순회하며 분류 결과를 추가.
     전처리: 복합 블록 분리 → 2-pass 분류 → 값 추출.
     """
-    # 전처리: 여러 정보가 합쳐진 블록 분리 (전화+이메일, 팩스+전화 등)
-    text_blocks = _split_multi_pattern_blocks(text_blocks)
+    # 전처리: 혼합 블록 분할(공유 세그멘터).
+    # 다중패턴(전화+이메일 등) 분할 + 단일패턴+이름/회사 분리("강미경 010..").
+    text_blocks = segment_text_blocks(text_blocks)
 
     # 1st pass: 확실한 패턴 먼저 분류 (이메일, 휴대폰)
     # → 2nd pass에서 이미 분류된 블록을 문맥으로 참조할 수 있게 함
@@ -889,3 +1387,104 @@ def classify_all_blocks(text_blocks: list[dict]) -> list[dict]:
         })
 
     return results
+
+
+# ════════════════════════════════════════════
+# 세그멘터 self-test (py ocr/src/classifier/rule_based.py 로 실행)
+# 정찰 false_split_tests 전수를 assert. 라벨링이 아닌 '분할'만 검증한다.
+# ════════════════════════════════════════════
+if __name__ == "__main__":
+    # (입력, 기대 세그먼트 리스트) — _segment_core 의 순수 분할 결과를 검증.
+    _CASES = [
+        # ── 분할O ──
+        ("강미경 010.6498.5121", ["강미경", "010.6498.5121"]),
+        ("(주)린텍 010-1234-5678", ["(주)린텍", "010-1234-5678"]),
+        ("김철수 hong@naver.com", ["김철수", "hong@naver.com"]),
+        # ── 분할O, 회귀보존(2+ 패턴) ──
+        ("T 052.227.0500 F 052.266.8284",
+         ["T 052.227.0500", "F 052.266.8284"]),
+        ("F.053-813-1212E.ukneeon@naver.com",
+         ["F.053-813-1212", "E.ukneeon@naver.com"]),
+        ("동793)T.053-813-8900,053-815-9100",
+         ["동793)T.053-813-8900", ",053-815-9100"]),
+        # ── 분할X (키워드 가드) ──
+        ("Mobile.010.4965.4540", ["Mobile.010.4965.4540"]),
+        ("Fax. 052.267.4925", ["Fax. 052.267.4925"]),
+        ("E-mail.long0656@hanmail.net", ["E-mail.long0656@hanmail.net"]),
+        ("H P 010.8540.7303", ["H P 010.8540.7303"]),
+        ("M 010 2818 3868", ["M 010 2818 3868"]),
+        ("T 053 521 8778", ["T 053 521 8778"]),
+        # ── 분할X (M.P/C.P/MP/CP 모바일 라벨 가드, 블로킹#1 회귀고정) ──
+        ("M.P 010-1234-5678", ["M.P 010-1234-5678"]),
+        ("C.P 010-1234-5678", ["C.P 010-1234-5678"]),
+        ("MP 010-1234-5678", ["MP 010-1234-5678"]),
+        ("CP 010-1234-5678", ["CP 010-1234-5678"]),
+        # ── 분할X (단독 패턴, 앞텍스트 없음) ──
+        ("010-3695-7600", ["010-3695-7600"]),
+        ("052.266.1183", ["052.266.1183"]),
+        # ── 분할X (주소/우편번호 오매칭 방지) ──
+        ("대구 동구 1462-10번지", ["대구 동구 1462-10번지"]),
+        ("41566 대구광역시", ["41566 대구광역시"]),
+        # ── 분할X (긴 숫자토큰 경계가드, 블로킹#2 데이터손상 회귀고정) ──
+        ("8809599360081", ["8809599360081"]),                  # 바코드
+        ("2602272636000113100007", ["2602272636000113100007"]),  # 영수증 거래번호
+        ("AID: A0000000031010", ["AID: A0000000031010"]),       # 카드 AID
+        ("POS 3346 거래 00123456789012", ["POS 3346 거래 00123456789012"]),
+        ("우리은행 1002-345-678901", ["우리은행 1002-345-678901"]),  # 은행계좌
+        # ── URL 단독 ──
+        ("www.mora.co.kr", ["www.mora.co.kr"]),
+        # ── 분할O 경계(패턴앞 전체 비키워드 텍스트 1조각) ──
+        ("담당자 강미경 010.1234.5678",
+         ["담당자 강미경", "010.1234.5678"]),
+    ]
+
+    _failed = 0
+    for _inp, _exp in _CASES:
+        _got = _segment_core(_inp)
+        _ok = _got == _exp
+        if not _ok:
+            _failed += 1
+        print(f"[{'OK ' if _ok else 'FAIL'}] {_inp!r}\n      got={_got!r}\n      exp={_exp!r}")
+
+    # ── 구두점 접두 조각은 버려지고 패턴만 남는지(결과는 분할 형태로 OK) ──
+    _g = _segment_core("· 010-1234-5678")
+    assert _g == ["010-1234-5678"], _g
+    print(f"[OK ] '· 010-1234-5678' -> {_g!r}")
+
+    # ── 앞 '0' 1글자<2자 → 버려지고 패턴세그먼트만(이름 오분할 없음) ──
+    _g = _segment_core("0010.8262.2514")
+    assert all(MOBILE_PATTERN.search(s) or LANDLINE_PATTERN.search(s) for s in _g), _g
+    assert not any(s in ("0", "00") for s in _g), _g
+    print(f"[OK ] '0010.8262.2514' -> {_g!r}")
+
+    # ── segment_text_blocks: block_index 보존 + dict 동형 ──
+    _blocks = [{"text": "강미경 010.6498.5121", "confidence": 0.9,
+                "bbox": [[0, 0]], "block_index": 3}]
+    _out = segment_text_blocks(_blocks)
+    assert len(_out) == 2, _out
+    assert all(b["block_index"] == 3 for b in _out), _out
+    assert [b["text"] for b in _out] == ["강미경", "010.6498.5121"], _out
+    assert all(b["confidence"] == 0.9 and b["bbox"] == [[0, 0]] for b in _out), _out
+    print(f"[OK ] segment_text_blocks block_index/keys preserved")
+
+    # ── segment_text_blocks: 단일패턴 무관 블록은 원본 객체 그대로 통과 ──
+    _single = [{"text": "010-3695-7600", "confidence": 0.5,
+                "bbox": None, "block_index": 1}]
+    assert segment_text_blocks(_single)[0] is _single[0]
+    print(f"[OK ] segment_text_blocks pass-through (no split)")
+
+    # ── segment_lines: 평탄화 + 순서/빈줄 보존 ──
+    _lines = ["강미경 010.6498.5121", "", "Mobile.010.4965.4540", "안녕하세요"]
+    _ls = segment_lines(_lines)
+    assert _ls == ["강미경", "010.6498.5121", "",
+                   "Mobile.010.4965.4540", "안녕하세요"], _ls
+    print(f"[OK ] segment_lines flatten/order/empty preserved")
+
+    # ── _split_multi_pattern_blocks 별칭이 segment_text_blocks 인지 ──
+    assert _split_multi_pattern_blocks is segment_text_blocks
+    print(f"[OK ] _split_multi_pattern_blocks aliases segment_text_blocks")
+
+    if _failed:
+        print(f"\n=== SELF-TEST FAILED: {_failed} case(s) ===")
+        raise SystemExit(1)
+    print(f"\n=== SELF-TEST PASSED: {len(_CASES)} cases + 6 extra asserts ===")

@@ -1,4 +1,4 @@
-import type { BusinessCard, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse } from '@/types'
+import type { BusinessCard, ApiResponse, ScanResult, DocumentType, TicketResponse, PosterResponse, ReceiptItem } from '@/types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080'
 const OCR_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
@@ -30,6 +30,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
     const parsed = inner.parsed || json.data?.parsed || {}
     const fields = inner.fields || json.data?.fields || {}
     const raw = inner.raw_blocks || json.data?.raw_blocks || []
+    const items = inner.items || json.data?.items || []   // 영수증 품목 (RECEIPT)
 
     return {
       success: true,
@@ -37,6 +38,7 @@ export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
         type: inner.type || json.data?.type || 'ETC',
         confidence: inner.confidence || json.data?.confidence || 0,
         parsed,
+        items,
         fields,
         rawTexts: raw.map((b: { text: string }) => b.text),
         rawBlocks: raw,
@@ -77,12 +79,37 @@ export async function saveCard(
   rawTexts: string[] = [],
   rawBlocks: { text: string; confidence: number }[] = [],
   confidence: number = 0,
+  items: ReceiptItem[] = [],
 ): Promise<ApiResponse<{ id: string }>> {
   try {
     let url: string
     let body: Record<string, unknown>
 
-    if (documentType === 'TICKET') {
+    if (documentType === 'RECEIPT') {
+      // 영수증 전용 엔드포인트 — items[] 포함 저장 (백엔드 ReceiptSaveRequest)
+      url = `${API_BASE}/api/receipts/save`
+      const parseAmount = (s?: string) => {
+        const n = parseInt((s || '').replace(/[^\d]/g, ''), 10)
+        return Number.isFinite(n) ? n : 0
+      }
+      body = {
+        docType: documentType,
+        classificationConfidence: confidence,
+        merchantName: fields.store_name || '',
+        purchaseDate: fields.purchase_date || '',
+        totalAmount: parseAmount(fields.total_amount),
+        rawText: rawTexts,
+        parsedJson: JSON.stringify({ ...fields, imageUrl }),
+        rawJson: JSON.stringify(rawBlocks),
+        items: items.map(it => ({
+          itemName: it.itemName,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          totalPrice: it.totalPrice,
+          category: it.category ?? null,
+        })),
+      }
+    } else if (documentType === 'TICKET') {
       url = `${API_BASE}/api/tickets/save`
       body = {
         docType: documentType,
@@ -118,8 +145,8 @@ export async function saveCard(
         rawJson: JSON.stringify(rawBlocks),
       }
     } else {
-      // BUSINESS_CARD, RECEIPT, ETC → 기존 명함 엔드포인트
-      url = `${API_BASE}/api/save`
+      // BUSINESS_CARD, ETC → 명함 엔드포인트 (CardController: /api/cards + /save)
+      url = `${API_BASE}/api/cards/save`
       body = {
         documentType,
         imageUrl,
@@ -171,7 +198,10 @@ export async function getMyCards(): Promise<ApiResponse<BusinessCard[]>> {
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `조회 실패 (${res.status})` }
     }
-    return { success: true, data: json.data }
+    // 백엔드 /api/cards 는 Spring Page({content,totalElements,...}) 를 반환.
+    // 목록 화면은 평면 배열을 기대 → content 를 꺼낸다(이미 배열이면 그대로).
+    const list = Array.isArray(json.data) ? json.data : (json.data?.content ?? [])
+    return { success: true, data: list }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
   }

@@ -138,7 +138,8 @@ export default function UploadPage() {
     const res = await saveCard(documentType, editFields, imageUrl,
       ocrScanResult?.rawTexts || [],
       ocrScanResult?.rawBlocks || [],
-      confidence)
+      confidence,
+      ocrScanResult?.items || [])
     setIsSaving(false)
 
     if (res.success) {
@@ -462,6 +463,29 @@ export default function UploadPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* 영수증 품목 (OCR 분해 결과) */}
+                {documentType === 'RECEIPT' && ocrScanResult?.items && ocrScanResult.items.length > 0 && (
+                  <div style={{ marginTop: 20 }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: '#15293D', marginBottom: 10 }}>
+                      구매 항목 <span style={{ color: '#999', fontWeight: 400 }}>({ocrScanResult.items.length})</span>
+                    </h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 44px 84px 84px', gap: 8, padding: '8px 4px', fontSize: 12, fontWeight: 600, color: '#64748B', borderBottom: '1px solid #E2E8F0' }}>
+                      <span>상품</span>
+                      <span style={{ textAlign: 'right' }}>수량</span>
+                      <span style={{ textAlign: 'right' }}>단가</span>
+                      <span style={{ textAlign: 'right' }}>금액</span>
+                    </div>
+                    {ocrScanResult.items.map((it, idx) => (
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 44px 84px 84px', gap: 8, padding: '8px 4px', fontSize: 13, color: '#15293D', borderBottom: '1px solid #F1F5F9' }}>
+                        <span>{it.itemName}</span>
+                        <span style={{ textAlign: 'right', color: '#64748B' }}>{it.quantity}</span>
+                        <span style={{ textAlign: 'right', color: '#64748B' }}>{it.unitPrice?.toLocaleString()}</span>
+                        <span style={{ textAlign: 'right', fontWeight: 600 }}>{it.totalPrice?.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {documentType === 'ETC' && (
                   <p style={{ fontSize: 13, color: '#999', textAlign: 'center', padding: '20px 0' }}>

@@ -45,11 +45,21 @@ export interface OcrImageSize {
   height: number
 }
 
+// 영수증 품목 (OCR /scan 이 RECEIPT 일 때 반환). 키는 백엔드 ReceiptItemRequest 와 동일.
+export interface ReceiptItem {
+  itemName: string
+  quantity: number
+  unitPrice: number
+  totalPrice: number
+  category?: string | null
+}
+
 // OCR 스캔 결과 인터페이스
 export interface ScanResult {
   type: DocumentType
   confidence: number
   parsed: Record<string, string>
+  items?: ReceiptItem[]   // 영수증 품목 (RECEIPT 만)
   fields: Record<string, string>
   rawTexts: string[]
   rawBlocks: RawBlock[]
