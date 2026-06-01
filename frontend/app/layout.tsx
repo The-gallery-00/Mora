@@ -25,6 +25,7 @@
 import type { Metadata } from 'next'
 import { Patua_One, Noto_Sans_KR } from 'next/font/google'
 import './globals.css'
+import ChatbotWidget from '@/components/common/ChatbotWidget'
 
 // 로고에 사용할 영문 세리프 폰트 (weight 400만 사용)
 const patuaOne = Patua_One({
@@ -57,6 +58,7 @@ export default function RootLayout({
       {/* 두 폰트의 CSS 변수를 body에 적용하고 Tailwind의 font-sans + antialiased 사용 */}
       <body className={`${patuaOne.variable} ${notoSansKR.variable} font-sans antialiased`}>
         {children}
+        <ChatbotWidget />
       </body>
     </html>
   )
