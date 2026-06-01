@@ -52,7 +52,7 @@ const TYPE_META: Record<SearchType, { label: string; icon: React.ReactNode }> = 
   TICKET: { label: '티켓', icon: <Calendar size={14} strokeWidth={1.8} /> },
 }
 
-const PAGE_SIZE = 3
+const PAGE_SIZE = 10
 const OCR_BASE = (process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
 function isSearchType(value: string | null): value is SearchType {
@@ -832,7 +832,7 @@ function PageButton({
         color: active ? C.blueText : C.mute,
         fontSize: 13,
         fontWeight: 700,
-        cursor: disabled ? 'not-allowed' : 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.45 : 1,
       }}
     >
