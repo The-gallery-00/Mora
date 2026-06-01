@@ -56,10 +56,12 @@ public class Ticket {
 
     // 파싱된 구조화 데이터 원본 (JSONB)
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String parsedJson;
 
     // OCR 응답 전체 원본 (JSONB)
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String rawJson;
 
     // rawText를 OpenAI text-embedding-ada-002로 임베딩한 1536차원 벡터
