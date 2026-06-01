@@ -1,11 +1,13 @@
 package com.mora.service;
 
 import com.mora.dto.llm.ChatRequest;
+import com.mora.dto.llm.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -21,7 +23,7 @@ public class LlmService {
     }
 
     @SuppressWarnings("unchecked")
-    public Map<String, Object> chat(ChatRequest chatRequest, String authorizationHeader) {
+    public ChatResponse chat(ChatRequest chatRequest, String authorizationHeader) {
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
@@ -46,7 +48,13 @@ public class LlmService {
             );
 
             Map<String, Object> responseBody = response.getBody();
-            return (Map<String, Object>) responseBody.get("data");
+            Map<String, Object> data = (Map<String, Object>) responseBody.get("data");
+
+            ChatResponse chatResponse = new ChatResponse();
+            chatResponse.setAnswer((String) data.get("answer"));
+            chatResponse.setSources((List<Map<String, Object>>) data.get("sources"));
+            chatResponse.setQuery((String) data.get("query"));
+            return chatResponse;
         } catch (Exception e) {
             throw new RuntimeException("LLM service call failed: " + e.getMessage(), e);
         }
