@@ -93,6 +93,16 @@ interface ScheduleItem {
   date: string;
 }
 
+interface CalendarIndicator {
+  key: string;
+  type: "POSTER" | "TICKET";
+  lane: number;
+  segment?: "single" | "start" | "middle" | "end";
+  label: string;
+  labelSpan?: number;
+  showLabel?: boolean;
+}
+
 const TYPE_COLORS: Record<
   string,
   { color: string; bg: string; label: string }
@@ -263,6 +273,159 @@ export default function DashboardPage() {
     return days;
   }, [currentYear, currentMonth]);
 
+  const calendarIndicators = useMemo(() => {
+    const byDate = new Map<string, CalendarIndicator[]>();
+    const occupiedByDate = new Map<string, Set<number>>();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+    const monthStart = formatDateKey(currentYear, currentMonth, 1);
+    const monthEnd = formatDateKey(currentYear, currentMonth, daysInMonth);
+
+    const getOccupied = (dateKey: string) => {
+      let occupied = occupiedByDate.get(dateKey);
+      if (!occupied) {
+        occupied = new Set<number>();
+        occupiedByDate.set(dateKey, occupied);
+      }
+      return occupied;
+    };
+
+    const pushIndicator = (dateKey: string, indicator: CalendarIndicator) => {
+      const indicators = byDate.get(dateKey) || [];
+      indicators.push(indicator);
+      byDate.set(dateKey, indicators);
+      getOccupied(dateKey).add(indicator.lane);
+    };
+
+    const getDateRange = (startKey: string, endKey: string) => {
+      const range: string[] = [];
+      const [startYear, startMonth, startDay] = startKey.split("-").map(Number);
+      const [endYear, endMonth, endDay] = endKey.split("-").map(Number);
+      const cursor = new Date(startYear, startMonth - 1, startDay);
+      const end = new Date(endYear, endMonth - 1, endDay);
+
+      while (cursor <= end) {
+        range.push(
+          formatDateKey(
+            cursor.getFullYear(),
+            cursor.getMonth(),
+            cursor.getDate(),
+          ),
+        );
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return range;
+    };
+
+    const postersInMonth = posters
+      .map((poster) => {
+        const start = (
+          poster.eventStartDate ||
+          poster.eventEndDate ||
+          ""
+        ).slice(0, 10);
+        const end = (poster.eventEndDate || poster.eventStartDate || "").slice(
+          0,
+          10,
+        );
+        if (!start || !end) return null;
+
+        const rangeStart = start <= end ? start : end;
+        const rangeEnd = start <= end ? end : start;
+        if (rangeEnd < monthStart || rangeStart > monthEnd) return null;
+
+        return {
+          poster,
+          start: rangeStart < monthStart ? monthStart : rangeStart,
+          end: rangeEnd > monthEnd ? monthEnd : rangeEnd,
+        };
+      })
+      .filter(Boolean) as {
+      poster: PosterResponse;
+      start: string;
+      end: string;
+    }[];
+
+    for (const ticket of tickets) {
+      const dateKey = (ticket.departureDate || "").slice(0, 10);
+      if (dateKey < monthStart || dateKey > monthEnd) continue;
+
+      let lane = 0;
+      while (getOccupied(dateKey).has(lane)) {
+        lane += 1;
+      }
+
+      pushIndicator(dateKey, {
+        key: `ticket-${ticket.id}-${dateKey}-${ticket.departureTime || ""}`,
+        type: "TICKET",
+        lane,
+        segment: "single",
+        label: `${ticket.departureLocation || "출발지"} -> ${ticket.arrivalLocation || "도착지"}`,
+        labelSpan: 1,
+        showLabel: true,
+      });
+    }
+
+    for (const { poster, start, end } of postersInMonth) {
+      const range = getDateRange(start, end);
+      let lane = 0;
+      while (range.some((dateKey) => getOccupied(dateKey).has(lane))) {
+        lane += 1;
+      }
+
+      const labelSpans = new Map<string, number>();
+      let currentRow = -1;
+      let currentChunk: string[] = [];
+
+      for (const dateKey of range) {
+        const day = Number(dateKey.slice(8, 10));
+        const row = Math.floor((firstDayOfMonth + day - 1) / 7);
+        if (row !== currentRow && currentChunk.length > 0) {
+          labelSpans.set(currentChunk[0], currentChunk.length);
+          currentChunk = [];
+        }
+        currentRow = row;
+        currentChunk.push(dateKey);
+      }
+      if (currentChunk.length > 0) {
+        labelSpans.set(currentChunk[0], currentChunk.length);
+      }
+
+      range.forEach((dateKey, index) => {
+        const isFirst = index === 0;
+        const isLast = index === range.length - 1;
+        pushIndicator(dateKey, {
+          key: `poster-${poster.id}-${start}-${end}`,
+          type: "POSTER",
+          lane,
+          segment:
+            isFirst && isLast
+              ? "single"
+              : isFirst
+                ? "start"
+                : isLast
+                  ? "end"
+                  : "middle",
+          label: poster.title || "포스터",
+          labelSpan: labelSpans.get(dateKey),
+          showLabel: labelSpans.has(dateKey),
+        });
+      });
+    }
+
+    return byDate;
+  }, [currentMonth, currentYear, posters, tickets]);
+
+  const maxCalendarIndicatorLane = useMemo(() => {
+    let maxLane = -1;
+    for (const indicators of calendarIndicators.values()) {
+      for (const indicator of indicators) {
+        maxLane = Math.max(maxLane, indicator.lane);
+      }
+    }
+    return maxLane;
+  }, [calendarIndicators]);
+
   function prevMonth() {
     if (currentMonth === 0) {
       setCurrentMonth(11);
@@ -283,6 +446,11 @@ export default function DashboardPage() {
 
   const calendarContentWidth = selectedDate == null ? 1016 : 508;
   const calendarRowGap = selectedDate == null ? 16 : 10;
+  const calendarEventOuterGap = selectedDate != null ? 1.5 : 4;
+  const calendarCellHeight =
+    selectedDate != null
+      ? Math.max(76, 30 + (maxCalendarIndicatorLane + 1) * 24 + 10)
+      : Math.max(112, 46 + (maxCalendarIndicatorLane + 1) * 24 + 12);
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
@@ -724,18 +892,28 @@ export default function DashboardPage() {
             >
               {calendarDays.map((day, i) => {
                 const dayOfWeek = i % 7;
+                const dateKey = day
+                  ? formatDateKey(currentYear, currentMonth, day)
+                  : "";
+                const indicators = dateKey
+                  ? calendarIndicators.get(dateKey) || []
+                  : [];
+                const labelLayer = indicators.reduce(
+                  (maxLayer, indicator) =>
+                    indicator.showLabel
+                      ? Math.max(maxLayer, indicator.labelSpan || 1)
+                      : maxLayer,
+                  0,
+                );
                 return day ? (
                   <button
                     key={i}
-                    onClick={() =>
-                      setSelectedDateKey(
-                        formatDateKey(currentYear, currentMonth, day),
-                      )
-                    }
+                    onClick={() => setSelectedDateKey(dateKey)}
                     style={{
-                      width: selectedDate != null ? 36 : 72,
-                      height: selectedDate != null ? 36 : 72,
-                      borderRadius: "50%",
+                      position: "relative",
+                      width: "100%",
+                      height: calendarCellHeight,
+                      borderRadius: 8,
                       border: "none",
                       background: isToday(day)
                         ? "#0077B6"
@@ -747,18 +925,105 @@ export default function DashboardPage() {
                       fontWeight: isToday(day) ? 700 : 400,
                       cursor: "pointer",
                       transition: "background 0.15s, transform 0.15s",
+                      overflow: "visible",
+                      boxSizing: "border-box",
+                      zIndex: labelLayer ? 20 + labelLayer : 1,
                     }}
                   >
-                    {day}
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: selectedDate != null ? 8 : 14,
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {day}
+                    </span>
+                    {indicators.map((indicator) => {
+                      const top =
+                        (selectedDate != null ? 30 : 46) + indicator.lane * 24;
+
+                      const segmentStyle =
+                        indicator.segment === "single"
+                          ? {
+                              left: calendarEventOuterGap,
+                              right: calendarEventOuterGap,
+                              borderRadius: 6,
+                            }
+                          : indicator.segment === "start"
+                            ? {
+                                left: calendarEventOuterGap,
+                                right: 0,
+                                borderRadius: "6px 0 0 6px",
+                              }
+                            : indicator.segment === "end"
+                              ? {
+                                  left: 0,
+                                  right: calendarEventOuterGap,
+                                  borderRadius: "0 6px 6px 0",
+                                }
+                              : {
+                                  left: 0,
+                                  right: 0,
+                                  borderRadius: 0,
+                                };
+                      const shouldShowLabel = indicator.showLabel ?? false;
+                      const labelSpan = indicator.labelSpan || 1;
+                      const labelSpanStyle =
+                        shouldShowLabel && labelSpan > 1
+                          ? {
+                              width: `calc(${labelSpan * 100}% - ${calendarEventOuterGap * 2}px)`,
+                              right: "auto",
+                              zIndex: 30,
+                            }
+                          : {};
+
+                      return (
+                        <span
+                          key={indicator.key}
+                          style={{
+                            position: "absolute",
+                            top,
+                            height: selectedDate != null ? 18 : 22,
+                            padding: "0 6px",
+                            boxSizing: "border-box",
+                            background:
+                              indicator.type === "TICKET"
+                                ? "#FCE7F3"
+                                : "#DCFCE7",
+                            color:
+                              indicator.type === "TICKET"
+                                ? "#9D174D"
+                                : "#166534",
+                            fontSize: selectedDate != null ? 8.5 : 14,
+                            fontWeight: 600,
+                            lineHeight: selectedDate != null ? "18px" : "22px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            textAlign: "center",
+                            zIndex: shouldShowLabel ? 30 : 2,
+                            ...segmentStyle,
+                            ...labelSpanStyle,
+                          }}
+                          title={indicator.label}
+                        >
+                          {shouldShowLabel ? indicator.label : ""}
+                        </span>
+                      );
+                    })}
                   </button>
                 ) : (
                   <div
                     key={"empty-" + i}
                     style={{
-                      width: selectedDate != null ? 36 : 72,
-                      height: selectedDate != null ? 36 : 72,
-                      borderRadius: "50%",
+                      width: "100%",
+                      height: calendarCellHeight,
+                      borderRadius: 8,
                       background: "transparent",
+                      boxSizing: "border-box",
                     }}
                   />
                 );
