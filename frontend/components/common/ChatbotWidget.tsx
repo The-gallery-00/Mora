@@ -3,6 +3,7 @@
 import { FormEvent, PointerEvent as ReactPointerEvent, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { usePathname } from 'next/navigation'
 import { CircleHelp, RotateCcw, X } from 'lucide-react'
+import { sendChatMessage, type ChatDocumentType } from '@/lib/api'
 
 type ChatRole = 'assistant' | 'user'
 
@@ -42,6 +43,12 @@ const HELP_GUIDES = [
 ]
 
 const DOCUMENT_TYPES: DocumentType[] = ['명함', '티켓', '포스터', '영수증']
+const DOCUMENT_TYPE_VALUES: Record<DocumentType, ChatDocumentType> = {
+  명함: 'BUSINESS_CARD',
+  티켓: 'TICKET',
+  포스터: 'POSTER',
+  영수증: 'RECEIPT',
+}
 const DOCUMENT_TYPE_PLACEHOLDERS: Record<DocumentType, string> = {
   명함: '명함에서 찾고 싶은 내용을 입력하세요',
   티켓: '티켓에서 출발지나 날짜를 검색해보세요',
@@ -81,7 +88,7 @@ function subscribeAuth(onStoreChange: () => void) {
   }
 }
 
-function clampPosition(x: number, y: number, panelWidth: number, panelHeight: number) {
+function clampPosition(x: number, y: number, panelWidth: number) {
   const margin = 12
   const maxX = Math.max(margin, window.innerWidth - panelWidth - margin)
   // Allow dragging down, but keep at least the title/header area visible.
@@ -94,25 +101,6 @@ function clampPosition(x: number, y: number, panelWidth: number, panelHeight: nu
     x: Math.min(Math.max(margin, x), maxX),
     y: Math.min(Math.max(margin, y), maxY),
   }
-}
-
-function createReply(text: string, selectedDocumentType: DocumentType | null) {
-  const normalized = text.toLowerCase()
-
-  if (normalized.includes('검색') || normalized.includes('찾')) {
-    if (selectedDocumentType) {
-      return `${selectedDocumentType} 유형으로 필터된 상태예요. 찾고 싶은 키워드를 알려주시면 해당 유형 안에서 빠르게 찾아드릴게요.`
-    }
-    return '먼저 문서 유형(명함/티켓/포스터/영수증)을 선택해 보세요. 찾고 싶은 키워드를 알려주시면 유형별로 정리해드릴게요.'
-  }
-  if (normalized.includes('업로드') || normalized.includes('ocr')) {
-    return '이미지를 올리면 OCR 인식과 분류가 자동으로 진행됩니다. 처리 후 요약까지 바로 확인하실 수 있어요.'
-  }
-  if (normalized.includes('캘린더') || normalized.includes('일정')) {
-    return '티켓과 포스터의 날짜 정보를 일정으로 연결해 관리할 수 있어요. 필요한 항목을 말해주시면 정리 기준도 안내해드릴게요.'
-  }
-
-  return '문의 내용을 확인했어요. 필요한 작업을 한 문장으로 알려주시면 더 정확하게 도와드릴게요.'
 }
 
 export default function ChatbotWidget() {
@@ -156,7 +144,7 @@ export default function ChatbotWidget() {
       const height = panel?.offsetHeight ?? Math.min(580, window.innerHeight - 24)
       const targetX = window.innerWidth - width - 20
       const targetY = window.innerHeight - height - 94
-      setPosition(clampPosition(targetX, targetY, width, height))
+      setPosition(clampPosition(targetX, targetY, width))
     }
 
     placePanel()
@@ -169,7 +157,7 @@ export default function ChatbotWidget() {
     const handleResize = () => {
       const panel = panelRef.current
       if (!panel || !position) return
-      setPosition(clampPosition(position.x, position.y, panel.offsetWidth, panel.offsetHeight))
+      setPosition(clampPosition(position.x, position.y, panel.offsetWidth))
     }
 
     window.addEventListener('resize', handleResize)
@@ -204,7 +192,7 @@ export default function ChatbotWidget() {
 
       const nextX = event.clientX - dragOffsetRef.current.x
       const nextY = event.clientY - dragOffsetRef.current.y
-      setPosition(clampPosition(nextX, nextY, panel.offsetWidth, panel.offsetHeight))
+      setPosition(clampPosition(nextX, nextY, panel.offsetWidth))
     }
 
     const handlePointerUp = () => {
@@ -260,12 +248,13 @@ export default function ChatbotWidget() {
     event.preventDefault()
   }
 
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
+  async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedDocumentType) return
+    if (!selectedDocumentType || isTyping) return
 
     const trimmed = input.trim()
     if (!trimmed) return
+    const documentType = DOCUMENT_TYPE_VALUES[selectedDocumentType]
 
     const userMessage: ChatMessage = {
       id: messageIdRef.current++,
@@ -281,15 +270,17 @@ export default function ChatbotWidget() {
       clearTimeout(typingTimeoutRef.current)
     }
 
-    typingTimeoutRef.current = setTimeout(() => {
-      const botMessage: ChatMessage = {
-        id: messageIdRef.current++,
-        role: 'assistant',
-        text: createReply(trimmed, selectedDocumentType),
-      }
-      setMessages(prev => [...prev, botMessage])
-      setIsTyping(false)
-    }, 500)
+    const result = await sendChatMessage(trimmed, documentType)
+    const botMessage: ChatMessage = {
+      id: messageIdRef.current++,
+      role: 'assistant',
+      text: result.success
+        ? result.data.answer || '관련 문서를 찾았지만 답변 내용이 비어 있어요.'
+        : result.error,
+    }
+
+    setMessages(prev => [...prev, botMessage])
+    setIsTyping(false)
   }
 
   function selectDocumentType(type: DocumentType) {
@@ -706,17 +697,17 @@ export default function ChatbotWidget() {
             />
             <button
               type="submit"
-              disabled={!selectedDocumentType || input.trim().length === 0}
+              disabled={!selectedDocumentType || input.trim().length === 0 || isTyping}
               style={{
                 width: 58,
                 height: 44,
                 border: 'none',
                 borderRadius: 12,
-                background: !selectedDocumentType || input.trim().length === 0 ? '#94A3B8' : '#15293D',
+                background: !selectedDocumentType || input.trim().length === 0 || isTyping ? '#94A3B8' : '#15293D',
                 color: '#FFFFFF',
                 fontSize: 13,
                 fontWeight: 700,
-                cursor: !selectedDocumentType || input.trim().length === 0 ? 'not-allowed' : 'pointer',
+                cursor: !selectedDocumentType || input.trim().length === 0 || isTyping ? 'not-allowed' : 'pointer',
                 flexShrink: 0,
               }}
             >
