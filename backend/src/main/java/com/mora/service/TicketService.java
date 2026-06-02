@@ -45,6 +45,7 @@ public class TicketService {
     // 하이브리드 점수 가중치: Fuzzy 60%, Vector 40%
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+    private static final double VECTOR_MIN_SCORE = 0.5;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
@@ -213,8 +214,10 @@ public class TicketService {
                 double score = row.get("vector_score") != null
                         ? ((Number) row.get("vector_score")).doubleValue()
                         : 0.0;
-                vectorScoreMap.put(id, score);
-                vectorRowMap.put(id, row);
+                if (score >= VECTOR_MIN_SCORE) {
+                    vectorScoreMap.put(id, score);
+                    vectorRowMap.put(id, row);
+                }
             }
         } else {
             embeddingFailed = true;
