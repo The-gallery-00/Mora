@@ -10,6 +10,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -38,6 +39,14 @@ public class Notification {
 
     @Column(columnDefinition = "TEXT")
     private String linkUrl;
+
+    @Column(length = 50)
+    private String sourceType;
+
+    @Column(length = 100)
+    private String sourceId;
+
+    private LocalDate targetDate;
 
     private LocalDateTime readAt;
 
