@@ -103,6 +103,11 @@ interface CalendarIndicator {
   showLabel?: boolean;
 }
 
+interface CalendarDayCell {
+  day: number;
+  monthOffset: -1 | 0 | 1;
+}
+
 const TYPE_COLORS: Record<
   string,
   { color: string; bg: string; label: string }
@@ -141,11 +146,6 @@ export default function DashboardPage() {
   const setSelectedDate = (date: null) => {
     if (date === null) setSelectedDateKey(null);
   };
-
-  const selectedDayInCurrentMonth =
-    selectedDate?.year === currentYear && selectedDate.month === currentMonth
-      ? selectedDate.day
-      : null;
 
   useEffect(() => {
     async function fetchData() {
@@ -267,9 +267,21 @@ export default function DashboardPage() {
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1).getDay();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const days: (number | null)[] = [];
-    for (let i = 0; i < firstDay; i++) days.push(null);
-    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+    const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const days: CalendarDayCell[] = [];
+
+    for (let i = firstDay - 1; i >= 0; i--) {
+      days.push({ day: daysInPrevMonth - i, monthOffset: -1 });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, monthOffset: 0 });
+    }
+    let nextMonthDay = 1;
+    while (days.length % 7 !== 0) {
+      days.push({ day: nextMonthDay, monthOffset: 1 });
+      nextMonthDay += 1;
+    }
+
     return days;
   }, [currentYear, currentMonth]);
 
@@ -416,15 +428,44 @@ export default function DashboardPage() {
     return byDate;
   }, [currentMonth, currentYear, posters, tickets]);
 
-  const maxCalendarIndicatorLane = useMemo(() => {
-    let maxLane = -1;
-    for (const indicators of calendarIndicators.values()) {
+  const calendarEventTop = selectedDate != null ? 34 : 54;
+  const calendarEventLaneGap = selectedDate != null ? 24 : 28;
+  const calendarBaseCellHeight = selectedDate != null ? 60 : 120;
+
+  const calendarRowHeights = useMemo(() => {
+    const rowCount = Math.ceil(calendarDays.length / 7);
+    const maxLaneByRow = Array.from({ length: rowCount }, () => -1);
+
+    calendarDays.forEach((cell, index) => {
+      if (cell.monthOffset !== 0) return;
+
+      const rowIndex = Math.floor(index / 7);
+      const dateKey = formatDateKey(currentYear, currentMonth, cell.day);
+      const indicators = calendarIndicators.get(dateKey) || [];
+
       for (const indicator of indicators) {
-        maxLane = Math.max(maxLane, indicator.lane);
+        maxLaneByRow[rowIndex] = Math.max(
+          maxLaneByRow[rowIndex],
+          indicator.lane,
+        );
       }
-    }
-    return maxLane;
-  }, [calendarIndicators]);
+    });
+
+    return maxLaneByRow.map((maxLane) =>
+      Math.max(
+        calendarBaseCellHeight,
+        calendarEventTop + (maxLane + 1) * calendarEventLaneGap,
+      ),
+    );
+  }, [
+    calendarBaseCellHeight,
+    calendarDays,
+    calendarEventLaneGap,
+    calendarEventTop,
+    calendarIndicators,
+    currentMonth,
+    currentYear,
+  ]);
 
   function prevMonth() {
     if (currentMonth === 0) {
@@ -439,18 +480,9 @@ export default function DashboardPage() {
     } else setCurrentMonth(currentMonth + 1);
   }
 
-  const isToday = (day: number) =>
-    day === today.getDate() &&
-    currentMonth === today.getMonth() &&
-    currentYear === today.getFullYear();
-
   const calendarContentWidth = selectedDate == null ? 1016 : 508;
-  const calendarRowGap = selectedDate == null ? 16 : 10;
-  const calendarEventOuterGap = selectedDate != null ? 1.5 : 4;
-  const calendarCellHeight =
-    selectedDate != null
-      ? Math.max(76, 30 + (maxCalendarIndicatorLane + 1) * 24 + 10)
-      : Math.max(112, 46 + (maxCalendarIndicatorLane + 1) * 24 + 12);
+  const calendarRowGap = selectedDate == null ? 10 : 6;
+  const calendarEventOuterGap = selectedDate != null ? 1.5 : 3;
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
@@ -783,7 +815,7 @@ export default function DashboardPage() {
             style={{
               borderRadius: 12,
               border: "1px solid #CBD5E1",
-              padding: selectedDate == null ? "40px 0 64px" : "20px 0 24px",
+              padding: selectedDate == null ? "40px 0" : "20px 0",
               background: "#FFFFFF",
               width: "100%",
               minHeight: selectedDate != null ? undefined : 420,
@@ -890,14 +922,36 @@ export default function DashboardPage() {
                 paddingTop: 6,
               }}
             >
-              {calendarDays.map((day, i) => {
+              {calendarDays.map((cell, i) => {
                 const dayOfWeek = i % 7;
-                const dateKey = day
-                  ? formatDateKey(currentYear, currentMonth, day)
-                  : "";
-                const indicators = dateKey
-                  ? calendarIndicators.get(dateKey) || []
-                  : [];
+                const rowIndex = Math.floor(i / 7);
+                const calendarCellHeight =
+                  calendarRowHeights[rowIndex] || calendarBaseCellHeight;
+                const cellDate = new Date(
+                  currentYear,
+                  currentMonth + cell.monthOffset,
+                  cell.day,
+                );
+                const dateKey = formatDateKey(
+                  cellDate.getFullYear(),
+                  cellDate.getMonth(),
+                  cellDate.getDate(),
+                );
+                const indicators =
+                  cell.monthOffset === 0
+                    ? calendarIndicators.get(dateKey) || []
+                    : [];
+                const isCurrentMonth = cell.monthOffset === 0;
+                const isCellToday =
+                  cellDate.getFullYear() === today.getFullYear() &&
+                  cellDate.getMonth() === today.getMonth() &&
+                  cellDate.getDate() === today.getDate();
+                const todayBadgeColor =
+                  dayOfWeek === 0
+                    ? "#DC2626"
+                    : dayOfWeek === 6
+                      ? "#2563EB"
+                      : "#0077B6";
                 const labelLayer = indicators.reduce(
                   (maxLayer, indicator) =>
                     indicator.showLabel
@@ -905,7 +959,7 @@ export default function DashboardPage() {
                       : maxLayer,
                   0,
                 );
-                return day ? (
+                return (
                   <button
                     key={i}
                     onClick={() => setSelectedDateKey(dateKey)}
@@ -913,20 +967,22 @@ export default function DashboardPage() {
                       position: "relative",
                       width: "100%",
                       height: calendarCellHeight,
-                      borderRadius: 8,
+                      borderRadius: 0,
                       border: "none",
-                      background: isToday(day)
-                        ? "#0077B6"
-                        : day === selectedDayInCurrentMonth
-                          ? "#E8EDF3"
-                          : "transparent",
-                      color: isToday(day) ? "#FFF" : getWeekendColor(dayOfWeek),
+                      background:
+                        selectedDateKey === dateKey ? "#E8EDF3" : "transparent",
+                      color: isCellToday
+                        ? "#FFF"
+                        : isCurrentMonth
+                          ? getWeekendColor(dayOfWeek)
+                          : "#CBD5E1",
                       fontSize: selectedDate != null ? 13 : 20,
-                      fontWeight: isToday(day) ? 700 : 400,
+                      fontWeight: isCellToday ? 700 : 400,
                       cursor: "pointer",
                       transition: "background 0.15s, transform 0.15s",
                       overflow: "visible",
                       boxSizing: "border-box",
+                      boxShadow: "inset 0 1px 0 #CBD5E1",
                       zIndex: labelLayer ? 20 + labelLayer : 1,
                     }}
                   >
@@ -935,15 +991,26 @@ export default function DashboardPage() {
                         position: "absolute",
                         top: selectedDate != null ? 8 : 14,
                         left: "50%",
+                        width: selectedDate != null ? 24 : 34,
+                        height: selectedDate != null ? 24 : 34,
+                        borderRadius: "50%",
+                        border: "none",
+                        background: isCellToday
+                          ? todayBadgeColor
+                          : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                         transform: "translateX(-50%)",
                         lineHeight: 1,
                       }}
                     >
-                      {day}
+                      {cell.day}
                     </span>
                     {indicators.map((indicator) => {
                       const top =
-                        (selectedDate != null ? 30 : 46) + indicator.lane * 24;
+                        calendarEventTop +
+                        indicator.lane * calendarEventLaneGap;
 
                       const segmentStyle =
                         indicator.segment === "single"
@@ -1015,17 +1082,6 @@ export default function DashboardPage() {
                       );
                     })}
                   </button>
-                ) : (
-                  <div
-                    key={"empty-" + i}
-                    style={{
-                      width: "100%",
-                      height: calendarCellHeight,
-                      borderRadius: 8,
-                      background: "transparent",
-                      boxSizing: "border-box",
-                    }}
-                  />
                 );
               })}
             </div>
