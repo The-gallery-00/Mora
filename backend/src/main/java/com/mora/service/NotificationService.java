@@ -10,6 +10,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -52,6 +53,50 @@ public class NotificationService {
         notification.setLinkUrl(normalize(request.getLinkUrl(), null));
 
         return NotificationResponse.from(notificationRepository.save(notification));
+    }
+
+    @Transactional
+    public boolean createIfNotExists(
+            UUID userId,
+            String type,
+            String title,
+            String message,
+            String linkUrl,
+            String sourceType,
+            String sourceId,
+            LocalDate targetDate) {
+        validateUserId(userId);
+        if (!hasText(type) || !hasText(title) || !hasText(message)
+                || !hasText(sourceType) || !hasText(sourceId) || targetDate == null) {
+            throw new RuntimeException("Notification source information is required");
+        }
+
+        String normalizedType = type.trim();
+        String normalizedSourceType = sourceType.trim();
+        String normalizedSourceId = sourceId.trim();
+
+        boolean exists = notificationRepository.existsByUserIdAndTypeAndSourceTypeAndSourceIdAndTargetDate(
+                userId,
+                normalizedType,
+                normalizedSourceType,
+                normalizedSourceId,
+                targetDate
+        );
+        if (exists) {
+            return false;
+        }
+
+        Notification notification = new Notification();
+        notification.setUserId(userId);
+        notification.setType(normalizedType);
+        notification.setTitle(title.trim());
+        notification.setMessage(message.trim());
+        notification.setLinkUrl(normalize(linkUrl, null));
+        notification.setSourceType(normalizedSourceType);
+        notification.setSourceId(normalizedSourceId);
+        notification.setTargetDate(targetDate);
+        notificationRepository.save(notification);
+        return true;
     }
 
     @Transactional
@@ -102,6 +147,10 @@ public class NotificationService {
         if (request.getMessage() == null || request.getMessage().isBlank()) {
             throw new RuntimeException("Message is required");
         }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private void validateUserId(UUID userId) {
