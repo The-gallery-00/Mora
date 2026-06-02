@@ -37,15 +37,15 @@ public class TicketService {
 
     // Fuzzy 검색 동적 임계값 시작점 (1.0 = 완전 일치만 허용)
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    // Fuzzy 검색 동적 임계값 최저점 (0.6 미만은 너무 관련 없는 결과)
-    private static final double FUZZY_THRESHOLD_MIN = 0.7;
+    // Fuzzy 검색 동적 임계값 최저점 (한국어 trigram 특성상 0.3이 적합)
+    private static final double FUZZY_THRESHOLD_MIN = 0.3;
     // 임계값 감소 단위
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
 
     // 하이브리드 점수 가중치: Fuzzy 60%, Vector 40%
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
-    private static final double VECTOR_MIN_SCORE = 0.5;
+    private static final double VECTOR_MIN_SCORE = 0.3;
     private static final double MIN_COMBINED_SCORE = 0.4;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
