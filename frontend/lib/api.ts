@@ -15,6 +15,54 @@ function clearAuthSession() {
   window.dispatchEvent(new Event('mora-session-change'))
 }
 
+export type ChatDocumentType = Exclude<DocumentType, 'ETC'>
+
+export interface ChatResponseData {
+  answer: string
+  sources: Record<string, unknown>[]
+  query: string
+}
+
+export async function sendChatMessage(
+  query: string,
+  documentType: ChatDocumentType,
+  topK = 5,
+): Promise<ApiResponse<ChatResponseData>> {
+  try {
+    const res = await fetch(`${API_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({
+        query,
+        document_type: documentType,
+        top_k: topK,
+      }),
+    })
+    const json = await res.json().catch(() => null)
+
+    if (res.status === 401) {
+      clearAuthSession()
+      return { success: false, error: '로그인 세션이 만료되었습니다. 다시 로그인해 주세요.' }
+    }
+
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `챗봇 답변을 불러오지 못했습니다. (${res.status})` }
+    }
+
+    return {
+      success: true,
+      data: {
+        answer: json.data?.answer || '',
+        sources: Array.isArray(json.data?.sources) ? json.data.sources : [],
+        query: json.data?.query || query,
+      },
+      message: json.message,
+    }
+  } catch {
+    return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** 이미지 파일을 서버로 보내 분류 + OCR 수행 */
 export async function scanImage(file: File): Promise<ApiResponse<ScanResult>> {
   try {
