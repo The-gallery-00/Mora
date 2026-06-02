@@ -46,6 +46,7 @@ public class TicketService {
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
     private static final double VECTOR_MIN_SCORE = 0.5;
+    private static final double MIN_COMBINED_SCORE = 0.4;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
@@ -235,6 +236,8 @@ public class TicketService {
             double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            if (combinedScore < MIN_COMBINED_SCORE) continue;
 
             // TicketResponse 생성 (Fuzzy Row 우선, 없으면 Vector Row 사용)
             Map<String, Object> row = fuzzyRowMap.containsKey(id)
