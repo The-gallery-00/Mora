@@ -38,7 +38,7 @@ public class TicketService {
     // Fuzzy 검색 동적 임계값 시작점 (1.0 = 완전 일치만 허용)
     private static final double FUZZY_THRESHOLD_START = 1.0;
     // Fuzzy 검색 동적 임계값 최저점 (0.6 미만은 너무 관련 없는 결과)
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_MIN = 0.7;
     // 임계값 감소 단위
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
 
