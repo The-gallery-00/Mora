@@ -188,9 +188,14 @@ public class CardService {
         }
 
         // 3) 점수 합산 및 최종 정렬
+        // fuzzy 결과가 있으면 fuzzy 결과만 대상으로 삼고, vector는 순위 보정용으로만 사용
+        // fuzzy 결과가 없으면(검색어가 텍스트에 없는 경우) vector 결과로 fallback
         Set<UUID> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!fuzzyScoreMap.isEmpty()) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         List<CardResponse> results = new ArrayList<>();
         for (UUID id : allIds) {
