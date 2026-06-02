@@ -28,6 +28,7 @@ app:
   jwt-expiration: ${JWT_EXPIRATION:86400000}
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
   ocr-service-url: ${OCR_SERVICE_URL:http://localhost:8000}
+  llm-service-url: ${LLM_SERVICE_URL:http://localhost:8001}
   openai-api-key: ${OPENAI_API_KEY:}
   calendar:
     google:
