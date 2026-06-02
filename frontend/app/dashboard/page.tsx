@@ -270,7 +270,7 @@ export default function DashboardPage() {
     currentMonth === today.getMonth() &&
     currentYear === today.getFullYear();
 
-  const calendarContentWidth = selectedDate == null ? 1000 : 500;
+  const calendarContentWidth = selectedDate == null ? 1016 : 508;
   const calendarRowGap = selectedDate == null ? 16 : 10;
 
   return (
