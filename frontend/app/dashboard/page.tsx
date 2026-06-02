@@ -264,6 +264,41 @@ export default function DashboardPage() {
     [selectedDateKey, tickets, posters],
   );
 
+  useEffect(() => {
+    if (!selectedDateKey) return;
+    const activeDateKey = selectedDateKey;
+
+    const moveDaysByKey: Record<string, number> = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -7,
+      ArrowDown: 7,
+    };
+
+    function handleCalendarKeyDown(event: KeyboardEvent) {
+      const moveDays = moveDaysByKey[event.key];
+      if (moveDays == null) return;
+
+      event.preventDefault();
+      const [year, month, day] = activeDateKey.split("-").map(Number);
+      const nextDate = new Date(year, month - 1, day);
+      nextDate.setDate(nextDate.getDate() + moveDays);
+
+      setSelectedDateKey(
+        formatDateKey(
+          nextDate.getFullYear(),
+          nextDate.getMonth(),
+          nextDate.getDate(),
+        ),
+      );
+      setCurrentYear(nextDate.getFullYear());
+      setCurrentMonth(nextDate.getMonth());
+    }
+
+    window.addEventListener("keydown", handleCalendarKeyDown);
+    return () => window.removeEventListener("keydown", handleCalendarKeyDown);
+  }, [selectedDateKey]);
+
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1).getDay();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
@@ -979,6 +1014,7 @@ export default function DashboardPage() {
                       fontSize: selectedDate != null ? 13 : 20,
                       fontWeight: isCellToday ? 700 : 400,
                       cursor: "pointer",
+                      outline: "none",
                       transition: "background 0.15s, transform 0.15s",
                       overflow: "visible",
                       boxSizing: "border-box",
@@ -1072,6 +1108,7 @@ export default function DashboardPage() {
                             whiteSpace: "nowrap",
                             textAlign: "center",
                             zIndex: shouldShowLabel ? 30 : 2,
+                            pointerEvents: "none",
                             ...segmentStyle,
                             ...labelSpanStyle,
                           }}
