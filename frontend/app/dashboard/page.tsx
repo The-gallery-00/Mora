@@ -62,6 +62,19 @@ function isDateInRange(dateStr: string, startDate?: string, endDate?: string) {
   return dateStr >= rangeStart && dateStr <= rangeEnd;
 }
 
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function scheduleItemKey(item: ScheduleItem): string {
+  return `${item.type}-${item.id}-${item.date}-${item.time}-${item.title}`;
+}
+
 interface DeadlineCard {
   id: string;
   title: string;
@@ -78,6 +91,21 @@ interface ScheduleItem {
   type: "POSTER" | "TICKET";
   time: string;
   date: string;
+}
+
+interface CalendarIndicator {
+  key: string;
+  type: "POSTER" | "TICKET";
+  lane: number;
+  segment?: "single" | "start" | "middle" | "end";
+  label: string;
+  labelSpan?: number;
+  showLabel?: boolean;
+}
+
+interface CalendarDayCell {
+  day: number;
+  monthOffset: -1 | 0 | 1;
 }
 
 const TYPE_COLORS: Record<
@@ -103,7 +131,8 @@ export default function DashboardPage() {
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
   const [deadlineCards, setDeadlineCards] = useState<DeadlineCard[]>([]);
-  const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>([]);
+  const [tickets, setTickets] = useState<TicketResponse[]>([]);
+  const [posters, setPosters] = useState<PosterResponse[]>([]);
   const [todayCount, setTodayCount] = useState(0);
   const [totalCards, setTotalCards] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,11 +147,6 @@ export default function DashboardPage() {
     if (date === null) setSelectedDateKey(null);
   };
 
-  const selectedDayInCurrentMonth =
-    selectedDate?.year === currentYear && selectedDate.month === currentMonth
-      ? selectedDate.day
-      : null;
-
   useEffect(() => {
     async function fetchData() {
       setIsLoading(true);
@@ -133,13 +157,15 @@ export default function DashboardPage() {
       ]);
 
       const tickets: TicketResponse[] = ticketsRes.success
-        ? ticketsRes.data
+        ? uniqueById(ticketsRes.data)
         : [];
       const posters: PosterResponse[] = postersRes.success
-        ? postersRes.data
+        ? uniqueById(postersRes.data)
         : [];
       const cards = cardsRes.success ? cardsRes.data : [];
 
+      setTickets(tickets);
+      setPosters(posters);
       setTotalCards(cards.length + tickets.length + posters.length);
 
       const deadlines: DeadlineCard[] = [];
@@ -185,7 +211,6 @@ export default function DashboardPage() {
         ),
       ];
       setTodayCount(todaySchedules.length);
-      buildScheduleForDate(todayStr, tickets, posters);
       setIsLoading(false);
     }
 
@@ -193,29 +218,11 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    async function updateSchedule(dateKey: string) {
-      const [ticketsRes, postersRes] = await Promise.all([
-        getMyTickets(0, 100),
-        getMyPosters(0, 100),
-      ]);
-      const tickets: TicketResponse[] = ticketsRes.success
-        ? ticketsRes.data
-        : [];
-      const posters: PosterResponse[] = postersRes.success
-        ? postersRes.data
-        : [];
-      buildScheduleForDate(dateKey, tickets, posters);
-    }
-    if (!isLoading && selectedDateKey) updateSchedule(selectedDateKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDateKey]);
-
-  function buildScheduleForDate(
+  function getScheduleItemsForDate(
     dateStr: string,
     tickets: TicketResponse[],
     posters: PosterResponse[],
-  ) {
+  ): ScheduleItem[] {
     const items: ScheduleItem[] = [];
     for (const t of tickets) {
       if (t.departureDate === dateStr) {
@@ -239,18 +246,261 @@ export default function DashboardPage() {
         });
       }
     }
-    items.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
-    setScheduleItems(items);
+    const uniqueItems = new Map<string, ScheduleItem>();
+    for (const item of items) {
+      uniqueItems.set(scheduleItemKey(item), item);
+    }
+
+    return Array.from(uniqueItems.values()).sort((a, b) =>
+      (a.time || "99:99").localeCompare(b.time || "99:99"),
+    );
   }
+
+  const scheduleItems = useMemo(
+    () =>
+      selectedDateKey
+        ? getScheduleItemsForDate(selectedDateKey, tickets, posters)
+        : [],
+    [selectedDateKey, tickets, posters],
+  );
+
+  useEffect(() => {
+    if (!selectedDateKey) return;
+    const activeDateKey = selectedDateKey;
+
+    const moveDaysByKey: Record<string, number> = {
+      ArrowLeft: -1,
+      ArrowRight: 1,
+      ArrowUp: -7,
+      ArrowDown: 7,
+    };
+
+    function handleCalendarKeyDown(event: KeyboardEvent) {
+      const moveDays = moveDaysByKey[event.key];
+      if (moveDays == null) return;
+
+      event.preventDefault();
+      const [year, month, day] = activeDateKey.split("-").map(Number);
+      const nextDate = new Date(year, month - 1, day);
+      nextDate.setDate(nextDate.getDate() + moveDays);
+
+      setSelectedDateKey(
+        formatDateKey(
+          nextDate.getFullYear(),
+          nextDate.getMonth(),
+          nextDate.getDate(),
+        ),
+      );
+      setCurrentYear(nextDate.getFullYear());
+      setCurrentMonth(nextDate.getMonth());
+    }
+
+    window.addEventListener("keydown", handleCalendarKeyDown);
+    return () => window.removeEventListener("keydown", handleCalendarKeyDown);
+  }, [selectedDateKey]);
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1).getDay();
     const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const days: (number | null)[] = [];
-    for (let i = 0; i < firstDay; i++) days.push(null);
-    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+    const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const days: CalendarDayCell[] = [];
+
+    for (let i = firstDay - 1; i >= 0; i--) {
+      days.push({ day: daysInPrevMonth - i, monthOffset: -1 });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, monthOffset: 0 });
+    }
+    let nextMonthDay = 1;
+    while (days.length % 7 !== 0) {
+      days.push({ day: nextMonthDay, monthOffset: 1 });
+      nextMonthDay += 1;
+    }
+
     return days;
   }, [currentYear, currentMonth]);
+
+  const calendarIndicators = useMemo(() => {
+    const byDate = new Map<string, CalendarIndicator[]>();
+    const occupiedByDate = new Map<string, Set<number>>();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+    const monthStart = formatDateKey(currentYear, currentMonth, 1);
+    const monthEnd = formatDateKey(currentYear, currentMonth, daysInMonth);
+
+    const getOccupied = (dateKey: string) => {
+      let occupied = occupiedByDate.get(dateKey);
+      if (!occupied) {
+        occupied = new Set<number>();
+        occupiedByDate.set(dateKey, occupied);
+      }
+      return occupied;
+    };
+
+    const pushIndicator = (dateKey: string, indicator: CalendarIndicator) => {
+      const indicators = byDate.get(dateKey) || [];
+      indicators.push(indicator);
+      byDate.set(dateKey, indicators);
+      getOccupied(dateKey).add(indicator.lane);
+    };
+
+    const getDateRange = (startKey: string, endKey: string) => {
+      const range: string[] = [];
+      const [startYear, startMonth, startDay] = startKey.split("-").map(Number);
+      const [endYear, endMonth, endDay] = endKey.split("-").map(Number);
+      const cursor = new Date(startYear, startMonth - 1, startDay);
+      const end = new Date(endYear, endMonth - 1, endDay);
+
+      while (cursor <= end) {
+        range.push(
+          formatDateKey(
+            cursor.getFullYear(),
+            cursor.getMonth(),
+            cursor.getDate(),
+          ),
+        );
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      return range;
+    };
+
+    const postersInMonth = posters
+      .map((poster) => {
+        const start = (
+          poster.eventStartDate ||
+          poster.eventEndDate ||
+          ""
+        ).slice(0, 10);
+        const end = (poster.eventEndDate || poster.eventStartDate || "").slice(
+          0,
+          10,
+        );
+        if (!start || !end) return null;
+
+        const rangeStart = start <= end ? start : end;
+        const rangeEnd = start <= end ? end : start;
+        if (rangeEnd < monthStart || rangeStart > monthEnd) return null;
+
+        return {
+          poster,
+          start: rangeStart < monthStart ? monthStart : rangeStart,
+          end: rangeEnd > monthEnd ? monthEnd : rangeEnd,
+        };
+      })
+      .filter(Boolean) as {
+      poster: PosterResponse;
+      start: string;
+      end: string;
+    }[];
+
+    for (const ticket of tickets) {
+      const dateKey = (ticket.departureDate || "").slice(0, 10);
+      if (dateKey < monthStart || dateKey > monthEnd) continue;
+
+      let lane = 0;
+      while (getOccupied(dateKey).has(lane)) {
+        lane += 1;
+      }
+
+      pushIndicator(dateKey, {
+        key: `ticket-${ticket.id}-${dateKey}-${ticket.departureTime || ""}`,
+        type: "TICKET",
+        lane,
+        segment: "single",
+        label: `${ticket.departureLocation || "출발지"} -> ${ticket.arrivalLocation || "도착지"}`,
+        labelSpan: 1,
+        showLabel: true,
+      });
+    }
+
+    for (const { poster, start, end } of postersInMonth) {
+      const range = getDateRange(start, end);
+      let lane = 0;
+      while (range.some((dateKey) => getOccupied(dateKey).has(lane))) {
+        lane += 1;
+      }
+
+      const labelSpans = new Map<string, number>();
+      let currentRow = -1;
+      let currentChunk: string[] = [];
+
+      for (const dateKey of range) {
+        const day = Number(dateKey.slice(8, 10));
+        const row = Math.floor((firstDayOfMonth + day - 1) / 7);
+        if (row !== currentRow && currentChunk.length > 0) {
+          labelSpans.set(currentChunk[0], currentChunk.length);
+          currentChunk = [];
+        }
+        currentRow = row;
+        currentChunk.push(dateKey);
+      }
+      if (currentChunk.length > 0) {
+        labelSpans.set(currentChunk[0], currentChunk.length);
+      }
+
+      range.forEach((dateKey, index) => {
+        const isFirst = index === 0;
+        const isLast = index === range.length - 1;
+        pushIndicator(dateKey, {
+          key: `poster-${poster.id}-${start}-${end}`,
+          type: "POSTER",
+          lane,
+          segment:
+            isFirst && isLast
+              ? "single"
+              : isFirst
+                ? "start"
+                : isLast
+                  ? "end"
+                  : "middle",
+          label: poster.title || "포스터",
+          labelSpan: labelSpans.get(dateKey),
+          showLabel: labelSpans.has(dateKey),
+        });
+      });
+    }
+
+    return byDate;
+  }, [currentMonth, currentYear, posters, tickets]);
+
+  const calendarEventTop = selectedDate != null ? 34 : 54;
+  const calendarEventLaneGap = selectedDate != null ? 24 : 28;
+  const calendarBaseCellHeight = selectedDate != null ? 60 : 120;
+
+  const calendarRowHeights = useMemo(() => {
+    const rowCount = Math.ceil(calendarDays.length / 7);
+    const maxLaneByRow = Array.from({ length: rowCount }, () => -1);
+
+    calendarDays.forEach((cell, index) => {
+      if (cell.monthOffset !== 0) return;
+
+      const rowIndex = Math.floor(index / 7);
+      const dateKey = formatDateKey(currentYear, currentMonth, cell.day);
+      const indicators = calendarIndicators.get(dateKey) || [];
+
+      for (const indicator of indicators) {
+        maxLaneByRow[rowIndex] = Math.max(
+          maxLaneByRow[rowIndex],
+          indicator.lane,
+        );
+      }
+    });
+
+    return maxLaneByRow.map((maxLane) =>
+      Math.max(
+        calendarBaseCellHeight,
+        calendarEventTop + (maxLane + 1) * calendarEventLaneGap,
+      ),
+    );
+  }, [
+    calendarBaseCellHeight,
+    calendarDays,
+    calendarEventLaneGap,
+    calendarEventTop,
+    calendarIndicators,
+    currentMonth,
+    currentYear,
+  ]);
 
   function prevMonth() {
     if (currentMonth === 0) {
@@ -265,13 +515,9 @@ export default function DashboardPage() {
     } else setCurrentMonth(currentMonth + 1);
   }
 
-  const isToday = (day: number) =>
-    day === today.getDate() &&
-    currentMonth === today.getMonth() &&
-    currentYear === today.getFullYear();
-
-  const calendarContentWidth = selectedDate == null ? 1000 : 500;
-  const calendarRowGap = selectedDate == null ? 16 : 10;
+  const calendarContentWidth = selectedDate == null ? 1016 : 508;
+  const calendarRowGap = selectedDate == null ? 10 : 6;
+  const calendarEventOuterGap = selectedDate != null ? 1.5 : 3;
 
   return (
     <div style={{ padding: "32px 40px", maxWidth: 1200, margin: "0 auto" }}>
@@ -604,7 +850,7 @@ export default function DashboardPage() {
             style={{
               borderRadius: 12,
               border: "1px solid #CBD5E1",
-              padding: selectedDate == null ? "40px 0 64px" : "20px 0 24px",
+              padding: selectedDate == null ? "40px 0" : "20px 0",
               background: "#FFFFFF",
               width: "100%",
               minHeight: selectedDate != null ? undefined : 420,
@@ -711,45 +957,168 @@ export default function DashboardPage() {
                 paddingTop: 6,
               }}
             >
-              {calendarDays.map((day, i) => {
+              {calendarDays.map((cell, i) => {
                 const dayOfWeek = i % 7;
-                return day ? (
+                const rowIndex = Math.floor(i / 7);
+                const calendarCellHeight =
+                  calendarRowHeights[rowIndex] || calendarBaseCellHeight;
+                const cellDate = new Date(
+                  currentYear,
+                  currentMonth + cell.monthOffset,
+                  cell.day,
+                );
+                const dateKey = formatDateKey(
+                  cellDate.getFullYear(),
+                  cellDate.getMonth(),
+                  cellDate.getDate(),
+                );
+                const indicators =
+                  cell.monthOffset === 0
+                    ? calendarIndicators.get(dateKey) || []
+                    : [];
+                const isCurrentMonth = cell.monthOffset === 0;
+                const isCellToday =
+                  cellDate.getFullYear() === today.getFullYear() &&
+                  cellDate.getMonth() === today.getMonth() &&
+                  cellDate.getDate() === today.getDate();
+                const todayBadgeColor =
+                  dayOfWeek === 0
+                    ? "#DC2626"
+                    : dayOfWeek === 6
+                      ? "#2563EB"
+                      : "#0077B6";
+                const labelLayer = indicators.reduce(
+                  (maxLayer, indicator) =>
+                    indicator.showLabel
+                      ? Math.max(maxLayer, indicator.labelSpan || 1)
+                      : maxLayer,
+                  0,
+                );
+                return (
                   <button
                     key={i}
-                    onClick={() =>
-                      setSelectedDateKey(
-                        formatDateKey(currentYear, currentMonth, day),
-                      )
-                    }
+                    onClick={() => setSelectedDateKey(dateKey)}
                     style={{
-                      width: selectedDate != null ? 36 : 72,
-                      height: selectedDate != null ? 36 : 72,
-                      borderRadius: "50%",
+                      position: "relative",
+                      width: "100%",
+                      height: calendarCellHeight,
+                      borderRadius: 0,
                       border: "none",
-                      background: isToday(day)
-                        ? "#0077B6"
-                        : day === selectedDayInCurrentMonth
-                          ? "#E8EDF3"
-                          : "transparent",
-                      color: isToday(day) ? "#FFF" : getWeekendColor(dayOfWeek),
+                      background:
+                        selectedDateKey === dateKey ? "#E8EDF3" : "transparent",
+                      color: isCellToday
+                        ? "#FFF"
+                        : isCurrentMonth
+                          ? getWeekendColor(dayOfWeek)
+                          : "#CBD5E1",
                       fontSize: selectedDate != null ? 13 : 20,
-                      fontWeight: isToday(day) ? 700 : 400,
+                      fontWeight: isCellToday ? 700 : 400,
                       cursor: "pointer",
+                      outline: "none",
                       transition: "background 0.15s, transform 0.15s",
+                      overflow: "visible",
+                      boxSizing: "border-box",
+                      boxShadow: "inset 0 1px 0 #CBD5E1",
+                      zIndex: labelLayer ? 20 + labelLayer : 1,
                     }}
                   >
-                    {day}
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: selectedDate != null ? 8 : 14,
+                        left: "50%",
+                        width: selectedDate != null ? 24 : 34,
+                        height: selectedDate != null ? 24 : 34,
+                        borderRadius: "50%",
+                        border: "none",
+                        background: isCellToday
+                          ? todayBadgeColor
+                          : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transform: "translateX(-50%)",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {cell.day}
+                    </span>
+                    {indicators.map((indicator) => {
+                      const top =
+                        calendarEventTop +
+                        indicator.lane * calendarEventLaneGap;
+
+                      const segmentStyle =
+                        indicator.segment === "single"
+                          ? {
+                              left: calendarEventOuterGap,
+                              right: calendarEventOuterGap,
+                              borderRadius: 6,
+                            }
+                          : indicator.segment === "start"
+                            ? {
+                                left: calendarEventOuterGap,
+                                right: 0,
+                                borderRadius: "6px 0 0 6px",
+                              }
+                            : indicator.segment === "end"
+                              ? {
+                                  left: 0,
+                                  right: calendarEventOuterGap,
+                                  borderRadius: "0 6px 6px 0",
+                                }
+                              : {
+                                  left: 0,
+                                  right: 0,
+                                  borderRadius: 0,
+                                };
+                      const shouldShowLabel = indicator.showLabel ?? false;
+                      const labelSpan = indicator.labelSpan || 1;
+                      const labelSpanStyle =
+                        shouldShowLabel && labelSpan > 1
+                          ? {
+                              width: `calc(${labelSpan * 100}% - ${calendarEventOuterGap * 2}px)`,
+                              right: "auto",
+                              zIndex: 30,
+                            }
+                          : {};
+
+                      return (
+                        <span
+                          key={indicator.key}
+                          style={{
+                            position: "absolute",
+                            top,
+                            height: selectedDate != null ? 18 : 22,
+                            padding: "0 6px",
+                            boxSizing: "border-box",
+                            background:
+                              indicator.type === "TICKET"
+                                ? "#FCE7F3"
+                                : "#DCFCE7",
+                            color:
+                              indicator.type === "TICKET"
+                                ? "#9D174D"
+                                : "#166534",
+                            fontSize: selectedDate != null ? 8.5 : 14,
+                            fontWeight: 600,
+                            lineHeight: selectedDate != null ? "18px" : "22px",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            textAlign: "center",
+                            zIndex: shouldShowLabel ? 30 : 2,
+                            pointerEvents: "none",
+                            ...segmentStyle,
+                            ...labelSpanStyle,
+                          }}
+                          title={indicator.label}
+                        >
+                          {shouldShowLabel ? indicator.label : ""}
+                        </span>
+                      );
+                    })}
                   </button>
-                ) : (
-                  <div
-                    key={"empty-" + i}
-                    style={{
-                      width: selectedDate != null ? 36 : 72,
-                      height: selectedDate != null ? 36 : 72,
-                      borderRadius: "50%",
-                      background: "transparent",
-                    }}
-                  />
                 );
               })}
             </div>
@@ -832,7 +1201,7 @@ export default function DashboardPage() {
                     const typeInfo = TYPE_COLORS[item.type];
                     return (
                       <div
-                        key={item.id}
+                        key={scheduleItemKey(item)}
                         style={{
                           display: "flex",
                           alignItems: "center",
