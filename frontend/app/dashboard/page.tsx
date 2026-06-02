@@ -62,6 +62,19 @@ function isDateInRange(dateStr: string, startDate?: string, endDate?: string) {
   return dateStr >= rangeStart && dateStr <= rangeEnd;
 }
 
+function uniqueById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function scheduleItemKey(item: ScheduleItem): string {
+  return `${item.type}-${item.id}-${item.date}-${item.time}-${item.title}`;
+}
+
 interface DeadlineCard {
   id: string;
   title: string;
@@ -103,7 +116,8 @@ export default function DashboardPage() {
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
   const [deadlineCards, setDeadlineCards] = useState<DeadlineCard[]>([]);
-  const [scheduleItems, setScheduleItems] = useState<ScheduleItem[]>([]);
+  const [tickets, setTickets] = useState<TicketResponse[]>([]);
+  const [posters, setPosters] = useState<PosterResponse[]>([]);
   const [todayCount, setTodayCount] = useState(0);
   const [totalCards, setTotalCards] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -133,13 +147,15 @@ export default function DashboardPage() {
       ]);
 
       const tickets: TicketResponse[] = ticketsRes.success
-        ? ticketsRes.data
+        ? uniqueById(ticketsRes.data)
         : [];
       const posters: PosterResponse[] = postersRes.success
-        ? postersRes.data
+        ? uniqueById(postersRes.data)
         : [];
       const cards = cardsRes.success ? cardsRes.data : [];
 
+      setTickets(tickets);
+      setPosters(posters);
       setTotalCards(cards.length + tickets.length + posters.length);
 
       const deadlines: DeadlineCard[] = [];
@@ -185,7 +201,6 @@ export default function DashboardPage() {
         ),
       ];
       setTodayCount(todaySchedules.length);
-      buildScheduleForDate(todayStr, tickets, posters);
       setIsLoading(false);
     }
 
@@ -193,29 +208,11 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    async function updateSchedule(dateKey: string) {
-      const [ticketsRes, postersRes] = await Promise.all([
-        getMyTickets(0, 100),
-        getMyPosters(0, 100),
-      ]);
-      const tickets: TicketResponse[] = ticketsRes.success
-        ? ticketsRes.data
-        : [];
-      const posters: PosterResponse[] = postersRes.success
-        ? postersRes.data
-        : [];
-      buildScheduleForDate(dateKey, tickets, posters);
-    }
-    if (!isLoading && selectedDateKey) updateSchedule(selectedDateKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDateKey]);
-
-  function buildScheduleForDate(
+  function getScheduleItemsForDate(
     dateStr: string,
     tickets: TicketResponse[],
     posters: PosterResponse[],
-  ) {
+  ): ScheduleItem[] {
     const items: ScheduleItem[] = [];
     for (const t of tickets) {
       if (t.departureDate === dateStr) {
@@ -239,9 +236,23 @@ export default function DashboardPage() {
         });
       }
     }
-    items.sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
-    setScheduleItems(items);
+    const uniqueItems = new Map<string, ScheduleItem>();
+    for (const item of items) {
+      uniqueItems.set(scheduleItemKey(item), item);
+    }
+
+    return Array.from(uniqueItems.values()).sort((a, b) =>
+      (a.time || "99:99").localeCompare(b.time || "99:99"),
+    );
   }
+
+  const scheduleItems = useMemo(
+    () =>
+      selectedDateKey
+        ? getScheduleItemsForDate(selectedDateKey, tickets, posters)
+        : [],
+    [selectedDateKey, tickets, posters],
+  );
 
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1).getDay();
@@ -832,7 +843,7 @@ export default function DashboardPage() {
                     const typeInfo = TYPE_COLORS[item.type];
                     return (
                       <div
-                        key={item.id}
+                        key={scheduleItemKey(item)}
                         style={{
                           display: "flex",
                           alignItems: "center",
