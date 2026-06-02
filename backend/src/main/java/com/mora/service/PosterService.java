@@ -184,8 +184,11 @@ public class PosterService {
         }
 
         Set<Integer> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!fuzzyScoreMap.isEmpty()) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         List<PosterResponse> results = new ArrayList<>();
         for (Integer id : allIds) {

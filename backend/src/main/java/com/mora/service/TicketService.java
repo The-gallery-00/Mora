@@ -225,10 +225,13 @@ public class TicketService {
         }
 
         // 3) 점수 합산 및 최종 정렬
-        // 두 검색 결과에 등장한 모든 티켓 ID를 수집
+        // fuzzy 결과가 있으면 fuzzy 결과만 대상으로 삼고, vector는 순위 보정용으로만 사용
         Set<Integer> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!fuzzyScoreMap.isEmpty()) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         // 각 티켓의 최종 점수 계산: Fuzzy × 0.6 + Vector × 0.4
         List<TicketResponse> results = new ArrayList<>();
