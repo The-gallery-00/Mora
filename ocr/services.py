@@ -45,6 +45,7 @@
 
 """공유 서비스 — lazy OCR 파이프라인 + 파싱 스킬."""
 import os
+import re
 import time
 
 # PaddlePaddle 내부 플래그 비활성화 (import 전에 설정해야 적용됨)
@@ -64,6 +65,7 @@ from src.classifier.rule_based import (
     MOBILE_PATTERN,
     LANDLINE_PATTERN,
     DATE_PATTERN,
+    TIME_PATTERN,
 )
 from src.classifier.field_schema import DOCUMENT_FIELDS
 
@@ -127,7 +129,7 @@ def _get_strategy() -> str:
 # 폰트가 크고 위에 있어도 이런 패턴이면 제목이 아니다(연락처/일시 헤더 오인 방지).
 _ATOMIC_TITLE_EXCLUDE = (
     EMAIL_PATTERN, WEBSITE_PATTERN, LINK_PATTERN,
-    MOBILE_PATTERN, LANDLINE_PATTERN, DATE_PATTERN,
+    MOBILE_PATTERN, LANDLINE_PATTERN, DATE_PATTERN, TIME_PATTERN,
 )
 # atomic '제외' 임계: 패턴 매치 span 이 텍스트의 이 비율 이상일 때만 제외.
 # ('2026.03 신년 행사'처럼 날짜토큰 부수포함 제목이 DATE 부분매치로 통째 배제되는 것 방지)
@@ -161,6 +163,8 @@ def _is_atomic_field_block(text: str) -> bool:
     t = (text or "").strip()
     if not t:
         return True   # 빈 텍스트는 제목 후보 아님
+    if DATE_PATTERN.search(t) and TIME_PATTERN.search(t):
+        return True   # 날짜+시간 동시 = 일정 라인(제목 아님)
     for pat in _ATOMIC_TITLE_EXCLUDE:
         m = pat.search(t)
         if m and (m.end() - m.start()) >= _ATOMIC_DOMINANCE * len(t):
@@ -218,6 +222,57 @@ def _pick_poster_title(blocks: list[dict]) -> int | None:
     big = [c for c in candidates if c[1] >= max_h * _TITLE_BIG_RATIO]
     best = min(big, key=lambda c: (c[2], -c[1], c[0]))
     return best[0]
+
+
+def _pick_poster_title_band(blocks: list[dict]) -> list[int]:
+    """포스터 제목 '밴드'를 bbox 로 묶어 인덱스 목록 반환(멀티블록 제목).
+
+    실세계 포스터 제목은 큰 글자가 여러 OCR 블록으로 쪼개진다
+    ('데이터분석'/'준전문가 ADsP'/'활용 과정 모집'). 단일 블록 픽으론 부족 →
+    제일 큰 글자(anchor) + 같은 상단 밴드(세로 근접 ≤2*anchor높이) + 충분히 큰 글자
+    (≥0.6*anchor)들을 모두 제목으로 묶는다. 섹션헤더(교육내용 등)는 세로로 멀어 제외.
+
+    제외: atomic(전화/이메일/URL/날짜), 세그먼트(bbox 공유), bbox 없음/퇴화.
+    Returns: 제목 블록 인덱스 목록(reading order). bbox 전무 → [](no-op, 회귀안전).
+    """
+    if not blocks:
+        return []
+    idx_counts: dict = {}
+    for b in blocks:
+        bi = b.get("block_index")
+        if bi is not None:
+            idx_counts[bi] = idx_counts.get(bi, 0) + 1
+
+    cand = []  # (i, height, cy, cx)
+    for i, b in enumerate(blocks):
+        bi = b.get("block_index")
+        if bi is not None and idx_counts.get(bi, 0) > 1:
+            continue
+        ys = _bbox_ys(b.get("bbox"))
+        if ys is None:
+            continue
+        txt = b.get("text", "")
+        if _is_atomic_field_block(txt):       # 전화/이메일/URL/날짜/시간 dominant 제외
+            continue
+        if re.match(r"^\s*(위치|장소|venue|오시는\s*길)\s*[:：]", txt):
+            continue                          # 위치/장소 라벨 블록은 제목 아님
+        h = max(ys) - min(ys)
+        if h <= 0:
+            continue
+        xs = [p[0] for p in b["bbox"]]
+        cand.append((i, h, sum(ys) / len(ys), sum(xs) / len(xs)))
+    if not cand:
+        return []
+
+    _, ah, acy, _ = max(cand, key=lambda c: c[1])
+    band = [c for c in cand if c[1] >= 0.6 * ah and abs(c[2] - acy) <= 2.0 * ah]
+    # 한글 우선: 밴드에 한글 블록이 있으면 영어전용(슬로건/로고/태그라인) 블록 제외.
+    # 한국 행사 포스터 제목은 한글(영문 약어는 한글 블록에 섞여 있어 보존됨).
+    kor = [c for c in band if re.search(r"[가-힣]", blocks[c[0]].get("text", ""))]
+    if kor:
+        band = kor
+    band.sort(key=lambda c: (c[2], c[3]))   # reading order(위→아래, 왼→오른)
+    return [c[0] for c in band]
 
 
 class ParsingSkill:
@@ -372,17 +427,52 @@ class ParsingSkill:
                 })
                 ml_fields_present.add(rf)
 
-        # ── POSTER 제목 bbox 휴리스틱 (보충 전용) ──
-        # ML 이 이미 title 을 분류했으면 휴리스틱은 개입하지 않는다. ML title 을 무조건
-        # bbox 로 오버라이드하면 슬로건(폰트>제목)이 흔한 포스터에서 맞춘 title 을
-        # 망친다(적대검증 치명이슈). ML 이 title 을 비웠을 때만 bbox 로 보충한다.
-        # bbox 없으면 _pick_poster_title 가 None → no-op(회귀안전).
-        if document_type == "POSTER":
-            has_ml_title = any(e.get("field") == "title" for e in ml_classified)
-            if not has_ml_title:
-                title_idx = _pick_poster_title(ml_classified)
-                if title_idx is not None:
-                    ml_classified[title_idx]["field"] = "title"
+        # ── POSTER 제목 bbox 밴드 그룹핑 ──
+        # 큰 제목이 여러 OCR 블록으로 쪼개지므로(데이터분석/준전문가 ADsP/활용...),
+        # bbox 로 상단 큰글자 밴드를 묶어 전부 title 로 만든다(_aggregate 가 reading
+        # order 로 합쳐 완전한 제목). 밴드 밖의 ML title 오인(슬로건/본문조각)은 강등.
+        # bbox 없으면(eval/합성) 밴드=[] → no-op, 기존 ML title 유지(회귀안전).
+        if document_type == "POSTER" and os.environ.get("POSTER_TITLE_BBOX", "1") == "1":
+            band = _pick_poster_title_band(ml_classified)
+            if band:
+                band_set = set(band)
+                for j, e in enumerate(ml_classified):
+                    if j in band_set:
+                        e["field"] = "title"
+                    elif e.get("field") == "title":
+                        e["field"] = "unknown"   # 밴드 밖 title 오인 → 강등
+
+            # ML 이 놓친 행사 날짜 보충: unknown 블록의 날짜패턴 → event_start/end.
+            # 접수/마감 기간은 행사일 아님(제외). 날짜 2개(범위)면 종료일도 추가.
+            present = {e.get("field") for e in ml_classified}
+            if "event_start_date" not in present:
+                for e in ml_classified:
+                    if e.get("field") != "unknown":
+                        continue
+                    txt = e.get("text", "")
+                    if re.search(r"접수|마감|신청\s*기간", txt):
+                        continue
+                    dm = [m.group() for m in DATE_PATTERN.finditer(txt)]
+                    if not dm:
+                        continue
+                    e["field"] = "event_start_date"
+                    if len(dm) >= 2 and "event_end_date" not in present:
+                        end = dict(e)
+                        end["field"] = "event_end_date"
+                        ml_classified.append(end)
+                    break
+
+            # ML 이 놓친 장소 보충: 장소/위치 라벨(어디든) 또는 대학+건물 venue 패턴.
+            if "location" not in present:
+                for e in ml_classified:
+                    if e.get("field") != "unknown":
+                        continue
+                    t = e.get("text", "")
+                    if (re.search(r"(장소|위치|실험\s*장소|오시는\s*길)\s*[:：]", t)
+                            or (re.search(r"대학교|대학|캠퍼스", t)
+                                and re.search(r"캠퍼스|[0-9]+\s*호|관|홀|빌딩|센터|타워", t))):
+                        e["field"] = "location"
+                        break
 
         return ml_classified
 

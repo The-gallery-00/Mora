@@ -448,17 +448,17 @@ def _clean_event_date(text: str, role: str) -> str:
     종료일에 연도 없으면 시작연도를 상속. 파싱 실패 시 노이즈만 제거한 원문 반환."""
     s = _strip_date_label(text)
     s = re.sub(r"\([^)]*\)", "", s)                 # (금)(목)(토/Sat) 요일 괄호 제거
-    if "~" in s and role in ("start", "end"):
-        parts = re.split(r"\s*~\s*", s)
-        if role == "start":
-            s = parts[0]
-        else:
-            tail = parts[-1]
-            if not re.search(r"\d{4}", tail):       # 종료쪽 연도 없으면 시작연도 상속
-                ym = re.search(r"(\d{4})", parts[0])
-                if ym:                              # ISO 파서 연도패턴(\d{4}[구분자])에 맞게 '.' 결합
-                    tail = ym.group(1) + "." + tail.lstrip(" .-/")
-            s = tail
+    # 범위: 날짜 토큰이 2개 이상이면 role 로 한쪽 선택(구분자 ~/- 무관).
+    matches = [m.group() for m in DATE_PATTERN.finditer(s)]
+    if len(matches) >= 2 and role in ("start", "end"):
+        chosen = matches[0] if role == "start" else matches[-1]
+        if role == "end" and not re.search(r"\d{4}", chosen):
+            ym = re.search(r"(\d{4})", matches[0])   # 종료일 연도 없으면 시작연도 상속
+            if ym:                                   # ISO 파서 연도패턴(\d{4}[구분자])에 맞게 '.' 결합
+                chosen = ym.group(1) + "." + chosen.lstrip(" .-/")
+        iso = _to_iso_datetime(chosen)
+        if iso:
+            return iso
     iso = _to_iso_datetime(s)
     if iso:
         return iso
@@ -476,9 +476,17 @@ def _clean_purchase_date(text: str) -> str:
 
 
 def _clean_location(text: str) -> str:
-    """장소 칸 선두 글머리/라벨 제거: '·장소:'/'위치:'/'at ' 등."""
+    """장소 칸 정제: 글머리/라벨(선두+중간) 제거 + 정확 중복 절반 축약."""
     s = text.strip().lstrip("·※▶►●*-> \t")
+    # 라벨(장소/위치/실험장소/오시는길/오리엔테이션/오프라인/온라인/venue) 선두·중간 제거
+    s = re.sub(r"(?i)\s*(실험\s*장소|장소|위치|오시는\s*길|오리엔테이션|오프라인|온라인|venue)\s*[:：]\s*", " ", s)
     s = re.sub(r"(?i)^\s*(장소|위치|venue|at)\s*[:：]?\s*", "", s)
+    s = re.sub(r"^[\-·\s]+", "", s)   # 선두 글머리(- · 등) 잔여 제거
+    s = re.sub(r"\s+", " ", s).strip()
+    # OCR/세그먼트 중복으로 같은 값이 두 번("A A") → 한 번으로.
+    half = len(s) // 2
+    if s[:half].strip() and s[:half].strip() == s[half:].strip():
+        s = s[:half].strip()
     return s.strip()
 
 
@@ -526,7 +534,12 @@ def extract_clean_value(text: str, field: str) -> str:
         # (명함의 E/T/F 아이콘 라벨에서 공백이 OCR로 소실된 케이스. email칸 한정.)
         cleaned = re.sub(r"^E(?=[a-z])", "", cleaned)
         match = EMAIL_PATTERN.search(cleaned) or EMAIL_PATTERN.search(text)
-        return match.group() if match else ""   # 유효 이메일 없으면 드롭(라벨 'E-mail'만 등)
+        if match:
+            return match.group()
+        # OCR 노이즈 폴백: 도메인 점 누락("@navercom") 등. @ 있으면 느슨 추출.
+        # (이미 contact_email 로 분류된 칸 한정 → 오탐 위험 낮음)
+        loose = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9._\-]+", text)
+        return loose.group() if loose else ""
     if field in ("mobile_phone", "office_phone", "contact_phone"):
         match = (MOBILE_PATTERN.search(text) or LANDLINE_PATTERN.search(text)
                  or _PHONE_LOOSE.search(text))
@@ -986,8 +999,8 @@ def classify_text_block_for_poster(text: str) -> str:
     if EMAIL_PATTERN.search(text_stripped):
         return "contact_email"
 
-    # 2) URL 링크 확인
-    if LINK_PATTERN.search(text_stripped):
+    # 2) URL 링크 확인 — 스킴/www 없는 맨도메인(foo.co.kr)도 포함(포스터 홈페이지)
+    if WEBSITE_PATTERN.search(text_stripped):
         return "website_url"
 
     # 3) 전화번호 확인 (휴대폰 또는 유선)
