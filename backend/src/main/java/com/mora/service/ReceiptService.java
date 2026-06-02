@@ -248,8 +248,9 @@ public class ReceiptService {
             embeddingFailed = true;
         }
 
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
         Set<Integer> allIds = new HashSet<>();
-        if (!fuzzyScoreMap.isEmpty()) {
+        if (!isFuzzyFallback) {
             allIds.addAll(fuzzyScoreMap.keySet());
         } else {
             allIds.addAll(vectorScoreMap.keySet());
@@ -261,7 +262,11 @@ public class ReceiptService {
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
 
-            if (combinedScore < MIN_COMBINED_SCORE) continue;
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
             ReceiptResponse response = mapRowToReceiptResponse(row);

@@ -226,8 +226,9 @@ public class TicketService {
 
         // 3) 점수 합산 및 최종 정렬
         // fuzzy 결과가 있으면 fuzzy 결과만 대상으로 삼고, vector는 순위 보정용으로만 사용
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
         Set<Integer> allIds = new HashSet<>();
-        if (!fuzzyScoreMap.isEmpty()) {
+        if (!isFuzzyFallback) {
             allIds.addAll(fuzzyScoreMap.keySet());
         } else {
             allIds.addAll(vectorScoreMap.keySet());
@@ -240,7 +241,11 @@ public class TicketService {
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
 
-            if (combinedScore < MIN_COMBINED_SCORE) continue;
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             // TicketResponse 생성 (Fuzzy Row 우선, 없으면 Vector Row 사용)
             Map<String, Object> row = fuzzyRowMap.containsKey(id)
