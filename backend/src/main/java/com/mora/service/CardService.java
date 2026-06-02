@@ -20,7 +20,7 @@ import java.util.*;
 public class CardService {
 
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_MIN = 0.7;
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
