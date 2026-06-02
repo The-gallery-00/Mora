@@ -184,7 +184,8 @@ public class PosterService {
         }
 
         Set<Integer> allIds = new HashSet<>();
-        if (!fuzzyScoreMap.isEmpty()) {
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
+        if (!isFuzzyFallback) {
             allIds.addAll(fuzzyScoreMap.keySet());
         } else {
             allIds.addAll(vectorScoreMap.keySet());
@@ -196,7 +197,11 @@ public class PosterService {
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
 
-            if (combinedScore < MIN_COMBINED_SCORE) continue;
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
             PosterResponse response = mapRowToPosterResponse(row);
