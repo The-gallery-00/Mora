@@ -4,6 +4,7 @@ import com.mora.dto.api.ServiceResult;
 import com.mora.dto.card.CardResponse;
 import com.mora.dto.card.CardRequest;
 import com.mora.entity.BusinessCard;
+import com.mora.repository.BusinessCardGroupRepository;
 import com.mora.repository.BusinessCardRepository;
 import org.springframework.stereotype.Service;
 
@@ -19,18 +20,23 @@ import java.util.*;
 public class CardService {
 
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_MIN = 0.3;
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+    private static final double VECTOR_MIN_SCORE = 0.3;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
     private final BusinessCardRepository cardRepository;
+    private final BusinessCardGroupRepository groupRepository;
     private final EmbeddingService embeddingService;
 
-    public CardService(BusinessCardRepository cardRepository, EmbeddingService embeddingService) {
+    public CardService(BusinessCardRepository cardRepository,
+                       BusinessCardGroupRepository groupRepository,
+                       EmbeddingService embeddingService) {
         this.cardRepository = cardRepository;
+        this.groupRepository = groupRepository;
         this.embeddingService = embeddingService;
     }
 
@@ -50,6 +56,10 @@ public class CardService {
         card.setEmail(request.getEmail());
         card.setRawOcrText(request.getRawOcrText());
         card.setImageUrl(request.getImageUrl());
+        if (request.getGroupId() != null) {
+            validateGroupOwnership(userId, request.getGroupId());
+            card.setGroupId(request.getGroupId());
+        }
         card.setEmbedding(embedding);
 
         card = cardRepository.save(card);
@@ -65,10 +75,18 @@ public class CardService {
         return CardResponse.from(card);
     }
 
-    public Page<CardResponse> listByUser(UUID userId, int page, int size) {
+    public Page<CardResponse> listByUser(UUID userId, int page, int size, UUID groupId, boolean ungrouped) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return cardRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable)
-                .map(CardResponse::from);
+        if (ungrouped) {
+            return cardRepository.findByUserIdAndGroupIdIsNullOrderByCreatedAtDesc(userId, pageable)
+                    .map(CardResponse::from);
+        }
+        if (groupId != null) {
+            validateGroupOwnership(userId, groupId);
+            return cardRepository.findByUserIdAndGroupIdOrderByCreatedAtDesc(userId, groupId, pageable)
+                    .map(CardResponse::from);
+        }
+        return cardRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable).map(CardResponse::from);
     }
 
     public ServiceResult<CardResponse> update(UUID userId, UUID cardId, CardRequest request) {
@@ -83,6 +101,10 @@ public class CardService {
         if (request.getEmail() != null) card.setEmail(request.getEmail());
         if (request.getRawOcrText() != null) card.setRawOcrText(request.getRawOcrText());
         if (request.getImageUrl() != null) card.setImageUrl(request.getImageUrl());
+        if (request.getGroupId() != null) {
+            validateGroupOwnership(userId, request.getGroupId());
+            card.setGroupId(request.getGroupId());
+        }
 
         String textForEmbedding = buildEmbeddingText(
                 card.getName(), card.getCompany(), card.getPosition(),
@@ -103,6 +125,16 @@ public class CardService {
                 .orElseThrow(() -> new RuntimeException("Card not found or unauthorized"));
 
         cardRepository.delete(card);
+    }
+
+    public CardResponse moveGroup(UUID userId, UUID cardId, UUID groupId) {
+        BusinessCard card = cardRepository.findByIdAndUserId(cardId, userId)
+                .orElseThrow(() -> new RuntimeException("Card not found or unauthorized"));
+        if (groupId != null) {
+            validateGroupOwnership(userId, groupId);
+        }
+        card.setGroupId(groupId);
+        return CardResponse.from(cardRepository.save(card));
     }
 
     // 하이브리드 검색(fuzzy+vector)
@@ -145,17 +177,24 @@ public class CardService {
                 double score = row.get("vector_score") != null
                         ? ((Number) row.get("vector_score")).doubleValue()
                         : 0.0;
-                vectorScoreMap.put(id, score);
-                vectorRowMap.put(id, row);
+                if (score >= VECTOR_MIN_SCORE) {
+                    vectorScoreMap.put(id, score);
+                    vectorRowMap.put(id, row);
+                }
             }
         } else {
             embeddingFailed = true;
         }
 
         // 3) 점수 합산 및 최종 정렬
+        // fuzzy 결과가 있으면 fuzzy 결과만 대상으로 삼고, vector는 순위 보정용으로만 사용
+        // fuzzy 결과가 없으면(검색어가 텍스트에 없는 경우) vector 결과로 fallback
         Set<UUID> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!fuzzyScoreMap.isEmpty()) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         List<CardResponse> results = new ArrayList<>();
         for (UUID id : allIds) {
@@ -186,6 +225,10 @@ public class CardService {
         cardResponse.setEmail((String) row.get("email"));
         cardResponse.setRawOcrText((String) row.get("raw_ocr_text"));
         cardResponse.setImageUrl((String) row.get("image_url"));
+        Object groupId = row.get("group_id");
+        if (groupId != null) {
+            cardResponse.setGroupId(UUID.fromString(groupId.toString()));
+        }
         Object createdAtObj = row.get("created_at");
         if (createdAtObj instanceof Instant) {
             cardResponse.setCreatedAt(((Instant) createdAtObj).atZone(ZoneId.systemDefault()).toLocalDateTime());
@@ -205,5 +248,11 @@ public class CardService {
         if (email != null) sb.append(email).append(" ");
         if (rawOcrText != null) sb.append(rawOcrText);
         return sb.toString().trim();
+    }
+
+    private void validateGroupOwnership(UUID userId, UUID groupId) {
+        if (!groupRepository.findByIdAndUserId(groupId, userId).isPresent()) {
+            throw new RuntimeException("그룹을 찾을 수 없습니다.");
+        }
     }
 }

@@ -63,12 +63,15 @@ public class Poster {
     private String rawText;
 
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String parsedJson;
 
     @Column(columnDefinition = "jsonb")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::jsonb")
     private String rawJson;
 
     @Column(columnDefinition = "vector(1536)")
+    @org.hibernate.annotations.ColumnTransformer(write = "?::vector")
     private String embedding;
 
     @Column(updatable = false)

@@ -3,6 +3,7 @@ package com.mora.service;
 import com.mora.dto.data.UserDataDeleteResponse;
 import com.mora.repository.BusinessCardRepository;
 import com.mora.repository.GoogleCalendarEventRepository;
+import com.mora.repository.NotificationRepository;
 import com.mora.repository.PosterRepository;
 import com.mora.repository.ReceiptRepository;
 import com.mora.repository.SearchHistoryRepository;
@@ -21,19 +22,22 @@ public class UserDataService {
     private final ReceiptRepository receiptRepository;
     private final SearchHistoryRepository searchHistoryRepository;
     private final GoogleCalendarEventRepository googleCalendarEventRepository;
+    private final NotificationRepository notificationRepository;
 
     public UserDataService(BusinessCardRepository businessCardRepository,
                            TicketRepository ticketRepository,
                            PosterRepository posterRepository,
                            ReceiptRepository receiptRepository,
                            SearchHistoryRepository searchHistoryRepository,
-                           GoogleCalendarEventRepository googleCalendarEventRepository) {
+                           GoogleCalendarEventRepository googleCalendarEventRepository,
+                           NotificationRepository notificationRepository) {
         this.businessCardRepository = businessCardRepository;
         this.ticketRepository = ticketRepository;
         this.posterRepository = posterRepository;
         this.receiptRepository = receiptRepository;
         this.searchHistoryRepository = searchHistoryRepository;
         this.googleCalendarEventRepository = googleCalendarEventRepository;
+        this.notificationRepository = notificationRepository;
     }
 
     @Transactional
@@ -48,7 +52,9 @@ public class UserDataService {
         long receipts = receiptRepository.countByUserId(userId);
         long histories = searchHistoryRepository.countByUserId(userId);
         long googleCalendarMappings = googleCalendarEventRepository.countByUserId(userId);
+        long notifications = notificationRepository.countByUserId(userId);
 
+        notificationRepository.deleteByUserId(userId);
         googleCalendarEventRepository.deleteByUserId(userId);
         searchHistoryRepository.deleteByUserId(userId);
         businessCardRepository.deleteByUserId(userId);
@@ -62,7 +68,8 @@ public class UserDataService {
                 posters,
                 receipts,
                 histories,
-                googleCalendarMappings
+                googleCalendarMappings,
+                notifications
         );
     }
 }

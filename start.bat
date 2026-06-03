@@ -2,9 +2,11 @@
 chcp 65001 >nul 2>&1
 echo ===== MORA START =====
 
-echo [0/5] Killing old processes...
+echo [0/6] Killing old processes...
 taskkill /IM node.exe /F >nul 2>&1
 taskkill /IM java.exe /F >nul 2>&1
+taskkill /IM python.exe /F >nul 2>&1
+taskkill /IM py.exe /F >nul 2>&1
 
 echo [Preflight] Checking required commands...
 set "PY_CMD="
@@ -51,31 +53,35 @@ if not defined PY_CMD (
     exit /b 1
 )
 
-echo [1/5] Starting DB...
+echo [1/6] Starting DB...
 docker start mora-db >nul 2>&1
 if %errorlevel% neq 0 (
     echo DB container not found, creating new one with named volume...
     docker run -d --name mora-db -e POSTGRES_DB=mora -e POSTGRES_USER=mora -e POSTGRES_PASSWORD=mora1234 -p 5433:5432 -v mora-pgdata:/var/lib/postgresql/data --restart unless-stopped pgvector/pgvector:pg16
     timeout /t 5 /nobreak >nul
-    echo [2/5] Database created. Spring Boot/Flyway will create the schema.
+    echo [2/6] Database created. Spring Boot/Flyway will create the schema.
 ) else (
     echo DB container already running.
     timeout /t 2 /nobreak >nul
 )
 
-echo [3/5] Starting Python OCR (port 8000) with auto-reload...
+echo [3/6] Starting Python OCR (port 8000) with auto-reload...
 start "MORA-OCR" cmd /k "cd /d %~dp0ocr && %PY_CMD% -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload"
 
-echo [4/5] Starting Spring Boot (port 8080)...
+echo [4/6] Starting Python LLM (port 8001) with auto-reload...
+start "MORA-LLM" cmd /k "cd /d %~dp0llm && %PY_CMD% -m uvicorn app:app --host 0.0.0.0 --port 8001 --reload"
+
+echo [5/6] Starting Spring Boot (port 8080)...
 start "MORA-Spring" cmd /k "cd /d %~dp0backend && %MVN_CMD% spring-boot:run"
 
-echo [5/5] Starting Frontend (port 3000)...
+echo [6/6] Starting Frontend (port 3000)...
 start "MORA-Frontend" cmd /k "cd /d %~dp0frontend && pnpm dev"
 
 echo.
 echo ===== ALL STARTED =====
 echo DB:       localhost:5433
 echo OCR:      http://localhost:8000
+echo LLM:      http://localhost:8001
 echo Spring:   http://localhost:8080
 echo Frontend: http://localhost:3000
 echo.

@@ -34,10 +34,12 @@ import java.util.UUID;
 public class ReceiptService {
 
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_MIN = 0.3;
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+    private static final double VECTOR_MIN_SCORE = 0.3;
+    private static final double MIN_COMBINED_SCORE = 0.4;
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
@@ -237,22 +239,34 @@ public class ReceiptService {
             for (Map<String, Object> row : vectorResults) {
                 Integer id = ((Number) row.get("id")).intValue();
                 double score = row.get("vector_score") != null ? ((Number) row.get("vector_score")).doubleValue() : 0.0;
-                vectorScoreMap.put(id, score);
-                vectorRowMap.put(id, row);
+                if (score >= VECTOR_MIN_SCORE) {
+                    vectorScoreMap.put(id, score);
+                    vectorRowMap.put(id, row);
+                }
             }
         } else {
             embeddingFailed = true;
         }
 
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
         Set<Integer> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!isFuzzyFallback) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         List<ReceiptResponse> results = new ArrayList<>();
         for (Integer id : allIds) {
             double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
             ReceiptResponse response = mapRowToReceiptResponse(row);

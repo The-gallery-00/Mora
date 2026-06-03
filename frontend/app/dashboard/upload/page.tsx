@@ -51,6 +51,7 @@ export default function UploadPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState('')
   const [isSaved, setIsSaved] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -70,6 +71,7 @@ export default function UploadPage() {
   const handleFile = useCallback((f: File) => {
     setFile(f)
     setError(null)
+    setSaveMessage(null)
     setIsScanned(false)
     setIsSaved(false)
     setSelectedBlockIndex(null)
@@ -135,14 +137,15 @@ export default function UploadPage() {
   const handleSave = async () => {
     setIsSaving(true)
     setError(null)
+    setSaveMessage(null)
     const res = await saveCard(documentType, editFields, imageUrl,
       ocrScanResult?.rawTexts || [],
       ocrScanResult?.rawBlocks || [],
-      confidence,
-      ocrScanResult?.items || [])
+      confidence)
     setIsSaving(false)
 
     if (res.success) {
+      setSaveMessage(res.message || null)
       setIsSaved(true)
     } else {
       setError(res.error || '저장 실패')
@@ -151,7 +154,7 @@ export default function UploadPage() {
 
   const handleReset = () => {
     setFile(null); setPreview(null); setIsScanned(false); setOcrScanResult(null)
-    setIsSaved(false); setError(null); setImageUrl('')
+    setIsSaved(false); setError(null); setSaveMessage(null); setImageUrl('')
     setDocumentType('ETC'); setConfidence(0)
     setEditFields({}); setFieldLabels({}); setSelectedBlockIndex(null)
   }
@@ -246,6 +249,15 @@ export default function UploadPage() {
           <p style={{ marginTop: 8, fontSize: 14, color: '#505050' }}>
             {TYPE_LABELS[documentType]} · {Object.values(editFields).filter(Boolean).slice(0, 2).join(' · ')}
           </p>
+          {saveMessage && (
+            <div style={{
+              margin: '20px auto 0', maxWidth: 520, padding: '12px 16px',
+              borderRadius: 10, background: '#FFFBEB', border: '1px solid #FDE68A',
+              color: '#92400E', fontSize: 13, lineHeight: 1.5, textAlign: 'left',
+            }}>
+              {saveMessage}
+            </div>
+          )}
           <button onClick={handleReset} style={{
             marginTop: 24, padding: '12px 32px', borderRadius: 10, border: 'none',
             background: '#0077B6', color: 'white', fontSize: 14, fontWeight: 600, cursor: 'pointer',
@@ -463,29 +475,6 @@ export default function UploadPage() {
                     </div>
                   ))}
                 </div>
-
-                {/* 영수증 품목 (OCR 분해 결과) */}
-                {documentType === 'RECEIPT' && ocrScanResult?.items && ocrScanResult.items.length > 0 && (
-                  <div style={{ marginTop: 20 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 700, color: '#15293D', marginBottom: 10 }}>
-                      구매 항목 <span style={{ color: '#999', fontWeight: 400 }}>({ocrScanResult.items.length})</span>
-                    </h3>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 44px 84px 84px', gap: 8, padding: '8px 4px', fontSize: 12, fontWeight: 600, color: '#64748B', borderBottom: '1px solid #E2E8F0' }}>
-                      <span>상품</span>
-                      <span style={{ textAlign: 'right' }}>수량</span>
-                      <span style={{ textAlign: 'right' }}>단가</span>
-                      <span style={{ textAlign: 'right' }}>금액</span>
-                    </div>
-                    {ocrScanResult.items.map((it, idx) => (
-                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 44px 84px 84px', gap: 8, padding: '8px 4px', fontSize: 13, color: '#15293D', borderBottom: '1px solid #F1F5F9' }}>
-                        <span>{it.itemName}</span>
-                        <span style={{ textAlign: 'right', color: '#64748B' }}>{it.quantity}</span>
-                        <span style={{ textAlign: 'right', color: '#64748B' }}>{it.unitPrice?.toLocaleString()}</span>
-                        <span style={{ textAlign: 'right', fontWeight: 600 }}>{it.totalPrice?.toLocaleString()}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
 
                 {documentType === 'ETC' && (
                   <p style={{ fontSize: 13, color: '#999', textAlign: 'center', padding: '20px 0' }}>

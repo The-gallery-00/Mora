@@ -2,14 +2,25 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMyCards, deleteCard, updateCard } from '@/lib/api'
-import type { BusinessCard } from '@/types'
+import {
+  createCardGroup,
+  deleteCardGroup,
+  getCardGroups,
+  getMyCards,
+  deleteCard,
+  moveCardToGroup,
+  updateCard,
+} from '@/lib/api'
+import type { BusinessCard, BusinessCardGroup } from '@/types'
 
 const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
+type ActiveGroup = 'all' | 'ungrouped' | string
 
 export default function StorageCardsPage() {
   const router = useRouter()
   const [cards, setCards] = useState<BusinessCard[]>([])
+  const [groups, setGroups] = useState<BusinessCardGroup[]>([])
+  const [activeGroup, setActiveGroup] = useState<ActiveGroup>('all')
   const [isLoading, setIsLoading] = useState(true)
   const [selectedCard, setSelectedCard] = useState<BusinessCard | null>(null)
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
@@ -57,16 +68,34 @@ export default function StorageCardsPage() {
   }
 
   useEffect(() => {
+    async function fetchGroups() {
+      const res = await getCardGroups()
+      if (res.success) setGroups(res.data)
+    }
+    fetchGroups()
+  }, [])
+
+  useEffect(() => {
     async function fetchCards() {
       setIsLoading(true)
-      const res = await getMyCards()
+      const res = await getMyCards({
+        groupId: activeGroup !== 'all' && activeGroup !== 'ungrouped' ? activeGroup : undefined,
+        ungrouped: activeGroup === 'ungrouped',
+      })
       if (res.success) {
-        setCards(res.data)
+        setCards(Array.isArray(res.data) ? res.data : [])
       }
       setIsLoading(false)
     }
     fetchCards()
-  }, [])
+  }, [activeGroup])
+
+  const activeGroupName =
+    activeGroup === 'all'
+      ? '전체명함'
+      : activeGroup === 'ungrouped'
+        ? '미분류'
+        : groups.find(group => group.id === activeGroup)?.name || '명함첩'
 
   const sortedCards = [...cards].sort((a, b) => {
     const da = new Date(a.createdAt || 0).getTime()
@@ -83,10 +112,55 @@ export default function StorageCardsPage() {
     setDeleteTargetId(null)
   }
 
+  async function handleAddGroup() {
+    const name = window.prompt('새 그룹명을 입력하세요.')
+    const trimmed = name?.trim()
+    if (!trimmed) return
+    const res = await createCardGroup(trimmed)
+    if (!res.success) {
+      alert(res.error || '그룹 추가에 실패했습니다.')
+      return
+    }
+    setGroups(prev => [...prev, res.data])
+    setActiveGroup(res.data.id)
+  }
+
+  async function handleDeleteGroup(groupId: string) {
+    const group = groups.find(item => item.id === groupId)
+    if (!window.confirm(`"${group?.name || '그룹'}" 그룹을 삭제할까요?\n그룹 안의 명함은 미분류로 이동됩니다.`)) return
+    const res = await deleteCardGroup(groupId)
+    if (!res.success) {
+      alert(res.error || '그룹 삭제에 실패했습니다.')
+      return
+    }
+    setGroups(prev => prev.filter(item => item.id !== groupId))
+    if (activeGroup === groupId) setActiveGroup('ungrouped')
+    setCards(prev => prev.map(card => card.groupId === groupId ? { ...card, groupId: null } : card))
+    if (selectedCard?.groupId === groupId) setSelectedCard({ ...selectedCard, groupId: null })
+  }
+
+  async function handleMoveCard(cardId: string, groupId: string | null) {
+    const res = await moveCardToGroup(cardId, groupId)
+    if (!res.success) {
+      alert(res.error || '그룹 이동에 실패했습니다.')
+      return
+    }
+    const moved = res.data
+    setSelectedCard(moved)
+    setCards(prev => {
+      const shouldRemain =
+        activeGroup === 'all' ||
+        (activeGroup === 'ungrouped' && !moved.groupId) ||
+        activeGroup === moved.groupId
+      if (!shouldRemain) return prev.filter(card => card.id !== moved.id)
+      return prev.map(card => card.id === moved.id ? moved : card)
+    })
+  }
+
   // 날짜별 그룹핑
   const groupedCards: Record<string, BusinessCard[]> = {}
   for (const card of sortedCards) {
-    const dateKey = card.createdAt ? card.createdAt.split('T')[0] : '날짜 없음'
+    const dateKey = typeof card.createdAt === 'string' ? card.createdAt.split('T')[0] : '날짜 없음'
     if (!groupedCards[dateKey]) groupedCards[dateKey] = []
     groupedCards[dateKey].push(card)
   }
@@ -134,23 +208,56 @@ export default function StorageCardsPage() {
               </svg>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#15293D' }}>명함첩</span>
             </div>
-            {['전체 명함', '회사', '거래처', '영업'].map((group, i) => (
+            {[
+              { id: 'all', name: '전체 명함' },
+              { id: 'ungrouped', name: '미분류' },
+            ].map(group => (
               <button
-                key={group}
+                key={group.id}
+                onClick={() => setActiveGroup(group.id)}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left',
                   padding: '8px 12px', borderRadius: 6,
                   border: 'none', cursor: 'pointer',
-                  background: i === 0 ? '#F0F9FF' : 'transparent',
-                  color: i === 0 ? '#0077B6' : '#505050',
-                  fontSize: 13, fontWeight: i === 0 ? 600 : 400,
+                  background: activeGroup === group.id ? '#F0F9FF' : 'transparent',
+                  color: activeGroup === group.id ? '#0077B6' : '#505050',
+                  fontSize: 13, fontWeight: activeGroup === group.id ? 600 : 400,
                   marginBottom: 2,
                 }}
               >
-                {group}
+                {group.name}
               </button>
             ))}
+            {groups.map(group => (
+              <div key={group.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  onClick={() => setActiveGroup(group.id)}
+                  style={{
+                    flex: 1, textAlign: 'left',
+                    padding: '8px 12px', borderRadius: 6,
+                    border: 'none', cursor: 'pointer',
+                    background: activeGroup === group.id ? '#F0F9FF' : 'transparent',
+                    color: activeGroup === group.id ? '#0077B6' : '#505050',
+                    fontSize: 13, fontWeight: activeGroup === group.id ? 600 : 400,
+                  }}
+                >
+                  {group.name}
+                </button>
+                <button
+                  onClick={() => handleDeleteGroup(group.id)}
+                  title="그룹 삭제"
+                  style={{
+                    width: 24, height: 24, borderRadius: 6,
+                    border: 'none', background: 'transparent',
+                    color: '#94A3B8', cursor: 'pointer', fontSize: 12,
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
             <button
+              onClick={handleAddGroup}
               style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 marginTop: 8, border: 'none', background: 'transparent',
@@ -174,7 +281,7 @@ export default function StorageCardsPage() {
             marginBottom: 20,
           }}>
             <h1 style={{ fontSize: 18, fontWeight: 700, color: '#15293D' }}>
-              전체명함 ({cards.length})
+              {activeGroupName} ({cards.length})
             </h1>
             <div style={{ display: 'flex', gap: 8 }}>
               <button style={{
@@ -428,17 +535,46 @@ export default function StorageCardsPage() {
 
               {selectedCard.imageUrl && (
                 <div style={{
-                  borderRadius: 12, overflow: 'hidden',
+                  borderRadius: 12,
+                  overflow: 'hidden',
                   border: '1px solid #E2E8F0',
+                  background: '#F8FAFC',
+                  flexShrink: 0,
                 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
                     alt={selectedCard.name}
-                    style={{ width: '100%', display: 'block' }}
+                    style={{
+                      width: '100%',
+                      height: 'auto',
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
                   />
                 </div>
               )}
+
+              <div style={{
+                padding: '12px 0',
+                borderBottom: '1px solid #F1F5F9',
+              }}>
+                <p style={{ fontSize: 11, color: '#999', marginBottom: 6 }}>명함 그룹</p>
+                <select
+                  value={selectedCard.groupId || ''}
+                  onChange={e => selectedCard.id && handleMoveCard(selectedCard.id, e.target.value || null)}
+                  style={{
+                    width: '100%', padding: '10px 12px', borderRadius: 6,
+                    border: '1px solid #CBD5E1', background: '#FAFBFC',
+                    fontSize: 14, color: '#333', outline: 'none',
+                  }}
+                >
+                  <option value="">미분류</option>
+                  {groups.map(group => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: isEditing ? 14 : 0 }}>
                 {fields.map(f => {

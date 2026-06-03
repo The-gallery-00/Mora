@@ -29,10 +29,12 @@ public class PosterService {
     );
 
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    private static final double FUZZY_THRESHOLD_MIN = 0.3;
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+    private static final double VECTOR_MIN_SCORE = 0.3;
+    private static final double MIN_COMBINED_SCORE = 0.4;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
@@ -172,22 +174,34 @@ public class PosterService {
                 double score = row.get("vector_score") != null
                         ? ((Number) row.get("vector_score")).doubleValue()
                         : 0.0;
-                vectorScoreMap.put(id, score);
-                vectorRowMap.put(id, row);
+                if (score >= VECTOR_MIN_SCORE) {
+                    vectorScoreMap.put(id, score);
+                    vectorRowMap.put(id, row);
+                }
             }
         } else {
             embeddingFailed = true;
         }
 
         Set<Integer> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
+        if (!isFuzzyFallback) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         List<PosterResponse> results = new ArrayList<>();
         for (Integer id : allIds) {
             double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             Map<String, Object> row = fuzzyRowMap.containsKey(id) ? fuzzyRowMap.get(id) : vectorRowMap.get(id);
             PosterResponse response = mapRowToPosterResponse(row);

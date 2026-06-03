@@ -2,6 +2,7 @@
 
 import os
 
+from langsmith import traceable
 from openai import OpenAI
 
 # 문서 타입별 한국어 설명 (프롬프트 내 컨텍스트 제목용)
@@ -75,6 +76,7 @@ class OpenAIClient:
         self.client = OpenAI(api_key=api_key)
         self.model = "gpt-4o-mini"
 
+    @traceable(name="GPT-4o-mini Generate")
     def generate(self, query: str, context_docs: list[dict], document_type: str) -> str:
         """
         검색된 문서들을 컨텍스트로 LLM 답변을 생성한다.
@@ -107,11 +109,12 @@ class OpenAIClient:
                     "당신은 사용자의 개인 문서 관리 어시스턴트입니다. "
                     "사용자가 저장한 명함, 티켓, 포스터, 영수증 데이터를 기반으로 질문에 답변합니다. "
                     "반드시 제공된 데이터만 참고하고, 데이터에 없는 내용은 추측하지 마세요. "
-                    "답변은 간결하고 명확하게 한국어로 작성하세요."
+                    "답변은 간결하고 명확하게 한국어로 작성하세요. "
+                    "답변은 자연스러운 문장(산문) 형식으로 작성하세요. 목록이나 기호(-,•)를 사용하지 마세요."
                 )},
                 {"role": "user", "content": user_message},
             ],
-            temperature=0.3,    # 사실 기반 답변을 위해 낮은 temperature
+            temperature=0,      # 사실 기반 답변 — 일관된 출력
             max_tokens=1024,
         )
 

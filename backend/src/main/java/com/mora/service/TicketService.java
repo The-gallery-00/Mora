@@ -5,10 +5,13 @@ import com.mora.dto.ticket.TicketResponse;
 import com.mora.dto.ticket.TicketRequest;
 import com.mora.entity.Ticket;
 import com.mora.repository.TicketRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -16,6 +19,7 @@ import java.util.*;
 
 @Service
 public class TicketService {
+    private static final Logger log = LoggerFactory.getLogger(TicketService.class);
 
     // 연도 있는 패턴 (우선 시도)
     private static final List<DateTimeFormatter> DATE_FORMATTERS_WITH_YEAR = List.of(
@@ -33,14 +37,16 @@ public class TicketService {
 
     // Fuzzy 검색 동적 임계값 시작점 (1.0 = 완전 일치만 허용)
     private static final double FUZZY_THRESHOLD_START = 1.0;
-    // Fuzzy 검색 동적 임계값 최저점 (0.6 미만은 너무 관련 없는 결과)
-    private static final double FUZZY_THRESHOLD_MIN = 0.6;
+    // Fuzzy 검색 동적 임계값 최저점 (한국어 trigram 특성상 0.3이 적합)
+    private static final double FUZZY_THRESHOLD_MIN = 0.3;
     // 임계값 감소 단위
     private static final double FUZZY_THRESHOLD_STEP = 0.1;
 
     // 하이브리드 점수 가중치: Fuzzy 60%, Vector 40%
     private static final double FUZZY_WEIGHT = 0.6;
     private static final double VECTOR_WEIGHT = 0.4;
+    private static final double VECTOR_MIN_SCORE = 0.3;
+    private static final double MIN_COMBINED_SCORE = 0.4;
 
     private static final String EMBEDDING_FAIL_MSG = "임베딩 생성 실패. Fuzzy 검색만 가능.";
 
@@ -209,18 +215,24 @@ public class TicketService {
                 double score = row.get("vector_score") != null
                         ? ((Number) row.get("vector_score")).doubleValue()
                         : 0.0;
-                vectorScoreMap.put(id, score);
-                vectorRowMap.put(id, row);
+                if (score >= VECTOR_MIN_SCORE) {
+                    vectorScoreMap.put(id, score);
+                    vectorRowMap.put(id, row);
+                }
             }
         } else {
             embeddingFailed = true;
         }
 
         // 3) 점수 합산 및 최종 정렬
-        // 두 검색 결과에 등장한 모든 티켓 ID를 수집
+        // fuzzy 결과가 있으면 fuzzy 결과만 대상으로 삼고, vector는 순위 보정용으로만 사용
+        boolean isFuzzyFallback = fuzzyScoreMap.isEmpty();
         Set<Integer> allIds = new HashSet<>();
-        allIds.addAll(fuzzyScoreMap.keySet());
-        allIds.addAll(vectorScoreMap.keySet());
+        if (!isFuzzyFallback) {
+            allIds.addAll(fuzzyScoreMap.keySet());
+        } else {
+            allIds.addAll(vectorScoreMap.keySet());
+        }
 
         // 각 티켓의 최종 점수 계산: Fuzzy × 0.6 + Vector × 0.4
         List<TicketResponse> results = new ArrayList<>();
@@ -228,6 +240,12 @@ public class TicketService {
             double fuzzyScore = fuzzyScoreMap.getOrDefault(id, 0.0);
             double vectorScore = vectorScoreMap.getOrDefault(id, 0.0);
             double combinedScore = fuzzyScore * FUZZY_WEIGHT + vectorScore * VECTOR_WEIGHT;
+
+            if (isFuzzyFallback) {
+                if (vectorScore < VECTOR_MIN_SCORE) continue;
+            } else {
+                if (combinedScore < MIN_COMBINED_SCORE) continue;
+            }
 
             // TicketResponse 생성 (Fuzzy Row 우선, 없으면 Vector Row 사용)
             Map<String, Object> row = fuzzyRowMap.containsKey(id)
@@ -326,9 +344,27 @@ public class TicketService {
 
     private String syncGoogleCalendar(UUID userId, Ticket ticket) {
         try {
-            googleCalendarService.syncTicketEvent(userId, ticket);
+            Optional<String> eventId = googleCalendarService.syncTicketEvent(userId, ticket);
+            if (eventId.isEmpty()
+                    && ticket != null
+                    && ticket.getDepartureDate() == null
+                    && googleCalendarService.getConnected(userId).isConnected()) {
+                return "구글 캘린더 동기화 건너뜀: 티켓 출발일을 인식하지 못했습니다.";
+            }
             return null;
+        } catch (RestClientResponseException e) {
+            log.warn("Google Calendar sync failed for userId={}, ticketId={}, status={}, body={}",
+                    userId,
+                    ticket == null ? null : ticket.getId(),
+                    e.getStatusCode(),
+                    e.getResponseBodyAsString(),
+                    e);
+            return "구글 캘린더 동기화 실패: Google API 응답 " + e.getStatusCode();
         } catch (RuntimeException e) {
+            log.warn("Google Calendar sync failed for userId={}, ticketId={}",
+                    userId,
+                    ticket == null ? null : ticket.getId(),
+                    e);
             return "구글 캘린더 동기화 실패: " + e.getMessage();
         }
     }

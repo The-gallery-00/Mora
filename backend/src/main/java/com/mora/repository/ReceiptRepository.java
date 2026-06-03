@@ -68,3 +68,4 @@ public interface ReceiptRepository extends JpaRepository<Receipt, Integer> {
             @Param("topK") int topK
     );
 }
+
