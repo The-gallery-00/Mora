@@ -1,0 +1,18 @@
+{
+  "model_type": "transformer_sequence_classification",
+  "base_model": "klue/bert-base",
+  "num_labels": 33,
+  "max_length": 128,
+  "input_format": "[DOCTYPE={dt}] [CTX] {prev} [TGT] {cur} [CTX] {next}",
+  "ctx_window": 1,
+  "doctype_masking": "logits of labels not in doctype_allowed_label_ids[doctype] set to -inf before argmax",
+  "epochs": 2.0,
+  "train_batch_size": 64,
+  "learning_rate": 3e-05,
+  "seed": 42,
+  "trained_on": {
+    "train_rows": 141057,
+    "weak_label_weight": 0.3
+  },
+  "note": "Synthetic test F1 != real-world F1. real_eval labels are rule-based weak labels (upper bound = rule performance). True real-world F1 requires gold correction."
+}
