@@ -68,6 +68,18 @@ DOCUMENT_FIELDS = {
     "ETC": {},
 }
 
+# 영수증 품목(라인아이템) 내부 라벨.
+# 스칼라 필드(DOCUMENT_FIELDS)가 아니라 services._build_receipt_items 에서
+# items[] = [{itemName, quantity, unitPrice, totalPrice, category}] 로 재구성된다.
+# 따라서 DOCUMENT_FIELDS 에는 넣지 않고, _aggregate 의 스칼라 집계에서 제외한다.
+RECEIPT_ITEM_LABELS = {"item_name", "item_price"}
+
+# 영수증 품목(라인아이템) 내부 라벨.
+# 스칼라 필드(DOCUMENT_FIELDS)가 아니라 services._build_receipt_items 에서
+# items[] = [{itemName, quantity, unitPrice, totalPrice, category}] 로 재구성된다.
+# 따라서 DOCUMENT_FIELDS 에는 넣지 않고, _aggregate 의 스칼라 집계에서 제외한다.
+RECEIPT_ITEM_LABELS = {"item_name", "item_price"}
+
 # 외부 필드명 → 한국어 라벨
 FIELD_LABELS_KO = {
     # 명함

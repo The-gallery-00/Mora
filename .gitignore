@@ -59,6 +59,10 @@ docs/__MACOSX/
 # ===== Claude Code =====
 .claude/
 
+# ===== OCR 모델 가중치 (GitHub 100MB 초과 → GCS로 별도 배포) =====
+ocr/models/field_extractor/model.safetensors
+ocr/models/field_extractor/training_args.bin
+
 # ===== 기타 =====
 *.pem
 coverage/

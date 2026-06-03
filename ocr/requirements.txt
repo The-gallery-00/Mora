@@ -26,6 +26,10 @@ numpy
 # 로드되지 않으며, 모델/패키지 없거나 추론 실패 시 규칙기반으로 자동 폴백.
 transformers>=4.40
 
+# 필드 정규화: 전화번호 산업표준(libphonenumber) 검증/포맷(국내표기 010-1234-5678).
+# 순수 파이썬·네이티브 의존성 없음(메모리 영향 미미). 부재 시 regex 폴백.
+phonenumbers
+
 # API Server
 fastapi
 uvicorn
