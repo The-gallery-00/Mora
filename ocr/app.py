@@ -109,8 +109,9 @@ app.add_middleware(
 app.include_router(ocr.router, prefix="/api", tags=["OCR"])
 
 # ── 이미지 파일 서빙 ──
-# 업로드된 이미지를 /uploads/파일명 URL로 접근 가능하게 정적 서빙
-UPLOAD_DIR = BACKEND_DIR.parent / "uploads"
+# 확인&저장 시점에 ocr/uploads/{종류}/ 에 저장된 이미지를
+# /uploads/... URL로 접근 가능하게 정적 서빙 (URL 경로는 종전과 동일)
+UPLOAD_DIR = BACKEND_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)  # 디렉토리가 없으면 생성
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
