@@ -312,17 +312,26 @@ export default function ChatbotWidget() {
               width: 64,
               height: 64,
               border: 'none',
-              borderRadius: '50%',
-              background: 'linear-gradient(145deg, #1D4ED8 0%, #15293D 100%)',
-              color: '#FFFFFF',
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '-0.01em',
-              boxShadow: '0 16px 30px rgba(15, 23, 42, 0.3)',
+              borderRadius: 0,
+              padding: 0,
+              overflow: 'visible',
+              background: 'transparent',
+              boxShadow: 'none',
               cursor: 'pointer',
             }}
           >
-            AI
+            <img
+              src="/icons/chatbot_logo.svg"
+              alt=""
+              aria-hidden="true"
+              style={{
+                display: 'block',
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                filter: 'drop-shadow(0 10px 20px rgba(15, 23, 42, 0.25))',
+              }}
+            />
           </button>
           {showTopButton && (
             <button
