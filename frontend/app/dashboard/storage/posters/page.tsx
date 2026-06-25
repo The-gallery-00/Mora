@@ -2,10 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { getMyPosters, deletePoster, updatePoster } from '@/lib/api'
+import { getMyPosters, deletePoster, updatePoster, getDocumentImageUrl } from '@/lib/api'
 import type { PosterResponse } from '@/types'
-
-const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
 
 function getImageUrl(poster: PosterResponse): string {
   if (poster.imageUrl) return poster.imageUrl
@@ -15,11 +13,6 @@ function getImageUrl(poster: PosterResponse): string {
   } catch {
     return ''
   }
-}
-
-function getFullImageUrl(imageUrl: string): string {
-  if (!imageUrl) return ''
-  return imageUrl.startsWith('http') ? imageUrl : `${IMAGE_BASE}${imageUrl}`
 }
 
 type EditableKey =
@@ -130,7 +123,7 @@ export default function StoragePostersPage() {
       {!isLoading && posters.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {posters.map(p => {
-            const imgUrl = getFullImageUrl(getImageUrl(p))
+            const imgUrl = getDocumentImageUrl(getImageUrl(p))
             return (
             <div
               key={p.id}
@@ -213,7 +206,7 @@ export default function StoragePostersPage() {
 
       {selectedPoster && (() => {
         const view = isEditing && editDraft ? editDraft : selectedPoster
-        const selectedImageUrl = getFullImageUrl(getImageUrl(selectedPoster))
+        const selectedImageUrl = getDocumentImageUrl(getImageUrl(selectedPoster))
         const fields: Array<{ key: EditableKey; label: string; multiline?: boolean }> = [
           { key: 'title', label: '제목' },
           { key: 'organizerName', label: '주최자' },
