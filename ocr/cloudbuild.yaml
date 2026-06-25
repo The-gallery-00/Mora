@@ -1,6 +1,7 @@
 substitutions:
   _IMAGE: asia-northeast3-docker.pkg.dev/mora-491911/cloud-run-source-deploy/mora-ocr:latest
   _WEIGHTS_URI: gs://mora-ocr-weights/field_extractor
+  _POSTER_WEIGHTS_URI: gs://mora-ocr-weights/field_extractor_poster
 
 steps:
   - name: gcr.io/cloud-builders/gsutil
@@ -10,6 +11,14 @@ steps:
       - -r
       - ${_WEIGHTS_URI}
       - models/field_extractor
+
+  - name: gcr.io/cloud-builders/gsutil
+    args:
+      - -m
+      - rsync
+      - -r
+      - ${_POSTER_WEIGHTS_URI}
+      - models/field_extractor_poster
 
   - name: gcr.io/cloud-builders/docker
     args:
