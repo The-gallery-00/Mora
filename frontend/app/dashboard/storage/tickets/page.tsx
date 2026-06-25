@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { getMyTickets, deleteTicket, updateTicket, getDocumentImageUrl } from "@/lib/api";
+import { getMyTickets, deleteTicket, updateTicket } from "@/lib/api";
 import type { TicketResponse } from "@/types";
+
+const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || "http://localhost:8000";
 
 // parsedJson에서 imageUrl 추출
 function getImageUrl(ticket: TicketResponse): string {
@@ -232,7 +234,7 @@ export default function StorageTicketsPage() {
       {!isLoading && tickets.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {tickets.map((t) => {
-            const imgUrl = getDocumentImageUrl(getImageUrl(t));
+            const imgUrl = getImageUrl(t);
             return (
               <div
                 key={t.id}
@@ -272,7 +274,11 @@ export default function StorageTicketsPage() {
                 >
                   {imgUrl ? (
                     <img
-                      src={imgUrl}
+                      src={
+                        imgUrl.startsWith("http")
+                          ? imgUrl
+                          : `${IMAGE_BASE}${imgUrl}`
+                      }
                       alt="티켓"
                       style={{
                         width: "100%",
@@ -488,8 +494,11 @@ export default function StorageTicketsPage() {
 
             {/* 이미지 + bbox overlay */}
             {(() => {
-              const imgUrl = getDocumentImageUrl(getImageUrl(selectedTicket));
+              const imgUrl = getImageUrl(selectedTicket);
               if (!imgUrl) return null;
+              const fullUrl = imgUrl.startsWith("http")
+                ? imgUrl
+                : `${IMAGE_BASE}${imgUrl}`;
               return (
                 <div
                   ref={imgRef}
@@ -501,7 +510,7 @@ export default function StorageTicketsPage() {
                   }}
                 >
                   <img
-                    src={imgUrl}
+                    src={fullUrl}
                     alt="티켓 원본"
                     style={{ width: "100%", display: "block" }}
                   />
