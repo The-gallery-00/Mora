@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getMyPosters, deletePoster, updatePoster } from "@/lib/api";
 import type { PosterResponse } from "@/types";
@@ -20,6 +20,12 @@ function getImageUrl(poster: PosterResponse): string {
 function getFullImageUrl(imageUrl: string): string {
   if (!imageUrl) return "";
   return imageUrl.startsWith("http") ? imageUrl : `${IMAGE_BASE}${imageUrl}`;
+}
+
+function withCacheBuster(url: string, key: string): string {
+  if (!url) return "";
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${encodeURIComponent(key)}`;
 }
 
 type EditableKey =
@@ -60,15 +66,35 @@ export default function StoragePostersPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetch() {
-      setIsLoading(true);
-      const res = await getMyPosters(0, 100);
-      if (res.success) setPosters(res.data);
-      setIsLoading(false);
-    }
-    fetch();
+  const loadPosters = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
+    const res = await getMyPosters(0, 100);
+    if (res.success) setPosters(res.data);
+    if (showLoading) setIsLoading(false);
   }, []);
+
+  useEffect(() => {
+    void loadPosters();
+
+    const refreshQuietly = () => {
+      void loadPosters(false);
+    };
+    const refreshForUpload = (event: Event) => {
+      const documentType = (event as CustomEvent<{ documentType?: string }>).detail
+        ?.documentType;
+      if (!documentType || documentType === "POSTER") refreshQuietly();
+    };
+
+    window.addEventListener("focus", refreshQuietly);
+    window.addEventListener("pageshow", refreshQuietly);
+    window.addEventListener("mora-documents-updated", refreshForUpload);
+
+    return () => {
+      window.removeEventListener("focus", refreshQuietly);
+      window.removeEventListener("pageshow", refreshQuietly);
+      window.removeEventListener("mora-documents-updated", refreshForUpload);
+    };
+  }, [loadPosters]);
 
   function openDrawer(p: PosterResponse | null) {
     setSelectedPoster(p);
@@ -181,7 +207,10 @@ export default function StoragePostersPage() {
       {!isLoading && posters.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {posters.map((p) => {
-            const imgUrl = getFullImageUrl(getImageUrl(p));
+            const imgUrl = withCacheBuster(
+              getFullImageUrl(getImageUrl(p)),
+              p.createdAt || p.id,
+            );
             return (
               <div
                 key={p.id}
@@ -331,7 +360,10 @@ export default function StoragePostersPage() {
       {selectedPoster &&
         (() => {
           const view = isEditing && editDraft ? editDraft : selectedPoster;
-          const selectedImageUrl = getFullImageUrl(getImageUrl(selectedPoster));
+          const selectedImageUrl = withCacheBuster(
+            getFullImageUrl(getImageUrl(selectedPoster)),
+            selectedPoster.createdAt || selectedPoster.id,
+          );
           const fields: Array<{
             key: EditableKey;
             label: string;

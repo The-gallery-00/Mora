@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   createCardGroup,
@@ -75,20 +75,39 @@ export default function StorageCardsPage() {
     fetchGroups()
   }, [])
 
-  useEffect(() => {
-    async function fetchCards() {
-      setIsLoading(true)
-      const res = await getMyCards({
-        groupId: activeGroup !== 'all' && activeGroup !== 'ungrouped' ? activeGroup : undefined,
-        ungrouped: activeGroup === 'ungrouped',
-      })
-      if (res.success) {
-        setCards(Array.isArray(res.data) ? res.data : [])
-      }
-      setIsLoading(false)
+  const fetchCards = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true)
+    const res = await getMyCards({
+      groupId: activeGroup !== 'all' && activeGroup !== 'ungrouped' ? activeGroup : undefined,
+      ungrouped: activeGroup === 'ungrouped',
+    })
+    if (res.success) {
+      setCards(Array.isArray(res.data) ? res.data : [])
     }
-    fetchCards()
+    if (showLoading) setIsLoading(false)
   }, [activeGroup])
+
+  useEffect(() => {
+    void fetchCards()
+
+    const refreshQuietly = () => {
+      void fetchCards(false)
+    }
+    const refreshForUpload = (event: Event) => {
+      const documentType = (event as CustomEvent<{ documentType?: string }>).detail?.documentType
+      if (!documentType || documentType === 'BUSINESS_CARD') refreshQuietly()
+    }
+
+    window.addEventListener('focus', refreshQuietly)
+    window.addEventListener('pageshow', refreshQuietly)
+    window.addEventListener('mora-documents-updated', refreshForUpload)
+
+    return () => {
+      window.removeEventListener('focus', refreshQuietly)
+      window.removeEventListener('pageshow', refreshQuietly)
+      window.removeEventListener('mora-documents-updated', refreshForUpload)
+    }
+  }, [fetchCards])
 
   const activeGroupName =
     activeGroup === 'all'

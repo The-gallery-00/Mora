@@ -286,7 +286,10 @@ export async function getMyCards(options: { groupId?: string | null; ungrouped?:
     if (options.groupId) params.set('groupId', options.groupId)
     if (options.ungrouped) params.set('ungrouped', 'true')
     const query = params.toString()
-    const res = await fetch(`${API_BASE}/api/cards${query ? `?${query}` : ''}`, { headers: getAuthHeaders() })
+    const res = await fetch(`${API_BASE}/api/cards${query ? `?${query}` : ''}`, {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    })
     const json = await res.json().catch(() => null)
 
     if (!res.ok || !json?.success) {
@@ -498,7 +501,10 @@ export async function updatePoster(posterId: string, body: Record<string, unknow
 /** 내 티켓 목록 조회 */
 export async function getMyTickets(page = 0, size = 20): Promise<ApiResponse<TicketResponse[]>> {
   try {
-    const res = await fetch(`${API_BASE}/api/tickets?page=${page}&size=${size}`, { headers: getAuthHeaders() })
+    const res = await fetch(`${API_BASE}/api/tickets?page=${page}&size=${size}`, {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    })
     const json = await res.json().catch(() => null)
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `조회 실패 (${res.status})` }
@@ -514,7 +520,10 @@ export async function getMyTickets(page = 0, size = 20): Promise<ApiResponse<Tic
 /** 내 포스터 목록 조회 */
 export async function getMyPosters(page = 0, size = 20): Promise<ApiResponse<PosterResponse[]>> {
   try {
-    const res = await fetch(`${API_BASE}/api/posters?page=${page}&size=${size}`, { headers: getAuthHeaders() })
+    const res = await fetch(`${API_BASE}/api/posters?page=${page}&size=${size}`, {
+      headers: getAuthHeaders(),
+      cache: 'no-store',
+    })
     const json = await res.json().catch(() => null)
     if (!res.ok || !json?.success) {
       return { success: false, error: json?.error || `조회 실패 (${res.status})` }
