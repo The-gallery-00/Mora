@@ -79,6 +79,9 @@ os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["FLAGS_enable_pir_api"] = "0"
 os.environ["FLAGS_enable_pir_in_executor"] = "0"
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+# 파서 전략: 학습 트랜스포머(POSTER=특화모델) + 규칙보정 = hybrid.
+# 기본값(rule)이면 ML모델/하이브리드 보정(제목밴드·organizer·날짜)을 안 탄다 → hybrid 강제.
+os.environ.setdefault("OCR_PARSER_STRATEGY", "hybrid")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

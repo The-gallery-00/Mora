@@ -98,46 +98,65 @@ class _FieldExtractor:
         return self.doctype_allow_ids.get("ETC", {0})
 
 
-# 싱글톤 상태 (None = 미로드, False = 로드 실패 확정, 객체 = 성공)
-_extractor = None
-_load_failed = False
+# ── per-doctype 모델 dir 해석 (POSTER 전용 가중치 분리 지원) ──
+_MODELS_ROOT = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "models"))
+
+
+def _resolve_model_dir(document_type: str) -> str:
+    """document_type 별 모델 dir. 우선순위:
+       env OCR_FIELD_EXTRACTOR_DIR_<DT> > (POSTER 면)field_extractor_poster(존재시) > 공유 MODEL_DIR.
+       백워드호환: 포스터 전용 dir/env 가 없으면 전부 공유모델(=기존 동작)."""
+    env = os.environ.get(f"OCR_FIELD_EXTRACTOR_DIR_{document_type}")
+    if env:
+        return env
+    if document_type == "POSTER":
+        p = os.path.join(_MODELS_ROOT, "field_extractor_poster")
+        if os.path.isfile(os.path.join(p, "label_map.json")):
+            return p
+    return MODEL_DIR
+
+
+# 싱글톤: 모델 dir 별 1개 로드/재사용 (POSTER 특화 + 공유 공존)
+_extractors = {}        # {model_dir: _FieldExtractor}
+_load_failed = set()    # {model_dir} 로드 실패 확정
 _lock = threading.Lock()
 
 
-def get_field_extractor():
+def get_field_extractor(document_type: str = "BUSINESS_CARD"):
     """
-    학습된 필드 추출기를 최초 호출 1회 로드하고 재사용.
+    document_type 에 맞는 학습 추출기를 lazy 로드/재사용(모델 dir 별 싱글톤).
     실패 시(파일 없음/torch·transformers 미설치/로드 오류) None 반환.
     예외를 절대 던지지 않는다 → 서비스가 rule 로 폴백 가능.
     """
-    global _extractor, _load_failed
-    if _extractor is not None:
-        return _extractor
-    if _load_failed:
+    model_dir = _resolve_model_dir(document_type)
+    ex = _extractors.get(model_dir)
+    if ex is not None:
+        return ex
+    if model_dir in _load_failed:
         return None
-
     with _lock:
-        # 더블체크 (락 대기 중 다른 스레드가 로드 완료했을 수 있음)
-        if _extractor is not None:
-            return _extractor
-        if _load_failed:
+        ex = _extractors.get(model_dir)
+        if ex is not None:
+            return ex
+        if model_dir in _load_failed:
             return None
         try:
-            _extractor = _load_extractor()
-            return _extractor
+            ex = _load_extractor(model_dir)
+            _extractors[model_dir] = ex
+            return ex
         except Exception as e:  # noqa: BLE001 — 어떤 실패도 폴백으로 흡수
-            _load_failed = True
-            print(f"[ML] field_extractor load failed -> rule fallback: {e!r}", flush=True)
+            _load_failed.add(model_dir)
+            print(f"[ML] field_extractor load failed -> rule fallback: {e!r} dir={model_dir}", flush=True)
             return None
 
 
-def _load_extractor() -> "_FieldExtractor":
+def _load_extractor(model_dir: str) -> "_FieldExtractor":
     """실제 로드 로직 (실패 시 예외를 던지고, 호출자가 흡수)."""
     import json
 
-    label_map_path = os.path.join(MODEL_DIR, "label_map.json")
-    if not os.path.isdir(MODEL_DIR) or not os.path.isfile(label_map_path):
-        raise FileNotFoundError(f"model dir or label_map.json missing: {MODEL_DIR}")
+    label_map_path = os.path.join(model_dir, "label_map.json")
+    if not os.path.isdir(model_dir) or not os.path.isfile(label_map_path):
+        raise FileNotFoundError(f"model dir or label_map.json missing: {model_dir}")
 
     # torch / transformers 는 여기서만 import (paddle 미사용, import 비용 지연)
     import torch
@@ -152,8 +171,8 @@ def _load_extractor() -> "_FieldExtractor":
     }
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL_DIR).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModelForSequenceClassification.from_pretrained(model_dir).to(device)
     model.eval()
 
     n_model = int(model.config.num_labels)
@@ -164,7 +183,7 @@ def _load_extractor() -> "_FieldExtractor":
         )
 
     print(
-        f"[ML] field_extractor loaded | dir={MODEL_DIR} | device={device} | "
+        f"[ML] field_extractor loaded | dir={model_dir} | device={device} | "
         f"labels={len(id2label)} | vocab={len(tokenizer)}",
         flush=True,
     )
@@ -200,7 +219,7 @@ def classify_blocks_ml(text_blocks: list[dict], document_type: str = "BUSINESS_C
     if not text_blocks:
         return []
 
-    extractor = get_field_extractor()
+    extractor = get_field_extractor(document_type)
     if extractor is None:
         # 명시적 신호: 호출자가 rule 폴백하도록 예외를 던진다.
         raise RuntimeError("field_extractor unavailable")
@@ -223,6 +242,8 @@ def classify_blocks_ml(text_blocks: list[dict], document_type: str = "BUSINESS_C
     device = extractor.device
     id2label = extractor.id2label
     num_labels = extractor.num_labels
+    # title 라벨 id (POSTER 제목밴드 picker 가 모델 title 확률로 후보를 거르게 함)
+    _title_id = next((i for i, l in id2label.items() if l == "title"), -1)
 
     # 라인 텍스트(strip)와 입력 문자열 구성 (문맥 ±1 = 인접 블록)
     lines = [(b.get("text") or "").strip() for b in text_blocks]
@@ -242,6 +263,7 @@ def classify_blocks_ml(text_blocks: list[dict], document_type: str = "BUSINESS_C
 
     pred_ids: list[int] = []
     pred_probs: list[float] = []
+    title_probs: list[float] = []
     batch_size = 64
     with torch.no_grad():
         for start in range(0, n, batch_size):
@@ -259,10 +281,14 @@ def classify_blocks_ml(text_blocks: list[dict], document_type: str = "BUSINESS_C
             top_p, top_i = probs.max(dim=-1)
             pred_ids.extend(top_i.detach().cpu().tolist())
             pred_probs.extend(top_p.detach().cpu().tolist())
+            if _title_id >= 0:
+                title_probs.extend(probs[:, _title_id].detach().cpu().tolist())
+            else:
+                title_probs.extend([0.0] * len(batch_texts))
 
     # rule 동형 entry 구성
     results = []
-    for b, lid, prob in zip(text_blocks, pred_ids, pred_probs):
+    for b, lid, prob, tprob in zip(text_blocks, pred_ids, pred_probs, title_probs):
         field = id2label.get(int(lid), UNKNOWN_LABEL)
         raw_text = (b.get("text") or "").strip()
         # 값 정제: 전화/이메일/URL/금액/이름/티켓필드는 rule 과 동일 정제
@@ -273,7 +299,8 @@ def classify_blocks_ml(text_blocks: list[dict], document_type: str = "BUSINESS_C
             "bbox": b.get("bbox"),
             "block_index": b["block_index"],
             "field": field,
-            "_ml_prob": round(float(prob), 4),  # 모델 확률은 부가키로만
+            "_ml_prob": round(float(prob), 4),       # 모델 확률은 부가키로만
+            "_title_prob": round(float(tprob), 4),   # title 라벨 확률(제목밴드 필터용)
         })
 
     return results

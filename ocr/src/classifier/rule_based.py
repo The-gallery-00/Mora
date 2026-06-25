@@ -448,6 +448,15 @@ def _clean_event_date(text: str, role: str) -> str:
     종료일에 연도 없으면 시작연도를 상속. 파싱 실패 시 노이즈만 제거한 원문 반환."""
     s = _strip_date_label(text)
     s = re.sub(r"\([^)]*\)", "", s)                 # (금)(목)(토/Sat) 요일 괄호 제거
+    # 2자리 연도(YY.M.D) → 20YY.M.D ('26.6.15' 가 '26.6'(월26) 으로 오파싱되는 것 방지).
+    # 4자리 연도 내부는 lookbehind(?<!\d)로 보호.
+    s = re.sub(r"(?<!\d)(\d{2})\s*[.\-/]\s*(\d{1,2})\s*[.\-/]\s*(\d{1,2})",
+               lambda m: (f"20{m.group(1)}.{m.group(2)}.{m.group(3)}"
+                          if 24 <= int(m.group(1)) <= 30 and int(m.group(2)) <= 12
+                          else m.group(0)), s)
+    # 날짜 패턴이 전혀 없으면 빈값(모델이 비-날짜 텍스트를 event_date 로 오분류한 경우 차단).
+    if not DATE_PATTERN.search(s):
+        return ""
     # 범위: 날짜 토큰이 2개 이상이면 role 로 한쪽 선택(구분자 ~/- 무관).
     matches = [m.group() for m in DATE_PATTERN.finditer(s)]
     if len(matches) >= 2 and role in ("start", "end"):
@@ -458,10 +467,10 @@ def _clean_event_date(text: str, role: str) -> str:
                 chosen = ym.group(1) + "." + chosen.lstrip(" .-/")
         iso = _to_iso_datetime(chosen)
         if iso:
-            return iso
+            return iso.split("T")[0]      # 행사일은 날짜만(시각 제거)
     iso = _to_iso_datetime(s)
     if iso:
-        return iso
+        return iso.split("T")[0]
     # 폴백: ISO 파싱 불가 → 꼬리 노이즈만 제거한 원문
     s = re.sub(r"\d+\s*일간|까지|부터", "", s)
     return re.sub(r"\s+", " ", s).strip(" .~-")
@@ -495,6 +504,35 @@ def _strip_org_label(s: str) -> str:
     return _ORG_LABEL_LEAD.sub("", s.strip()).strip(_ORG_BULLET)
 
 
+def _org_finalize(v: str) -> str:
+    """주최자 값 최종정제: 본문/주의문구 절단 + 연속·구(句) 중복 제거 + 과도 길이 컷.
+    깨끗한 기관명엔 no-op(본문마커/중복 없음). join 으로 길어진 junk 만 정리."""
+    v = (v or "").strip()
+    if not v:
+        return v
+    # 기관명 뒤 본문/주의/수상명/footnote 절단(기관명엔 안 나오는 마커만).
+    v = re.split(r"\s*(?:변경될|변경\s*될|사정으로|문의|신청|방문\s*또는|우편\s*:|에\s*관심|"
+                 r"관심있|지식재산|공공데이터|초청|관심\s*있|청년작가전)", v)[0].strip()
+    v = re.split(r"※|#|자세한|[0-9]+\s*층|복합문화공간|주관방송사|주관\s*방송", v)[0].strip()
+    v = re.sub(r"\s*(?:주관방송사|주관방송|후원|협찬|주관|주최)\s*$", "", v).strip(" /·-|")
+    # 수상명(…장상/…장관상 등)에서 절단 — 수상 주체명만 남김. generic '…장상' 포함.
+    v = re.split(r"(?<=[가-힣])(?:장상|장관상|회장상|시장상|군수상|위원장상|교육감상|총장상|이사장상)", v)[0].strip()
+    toks = v.split()
+    dd = []
+    for t in toks:                       # 연속 동일 토큰 제거
+        if not dd or dd[-1] != t:
+            dd.append(t)
+    n = len(dd)                          # 앞 구 통째 반복 제거: 'A B A B C' → 'A B C'
+    for k in range(1, n // 2 + 1):
+        if dd[:k] == dd[k:2 * k]:
+            dd = dd[:k] + dd[2 * k:]
+            break
+    v = " ".join(dd).strip(" /·-|")
+    if len(v.split()) > 6:              # 과도 길이 → 앞 6토큰
+        v = " ".join(v.split()[:6])
+    return v
+
+
 def _clean_organizer(text: str) -> str:
     """주최자 칸 정제: 선두/인라인 라벨 제거 + 메인(주최) 1개 선택. entity 타입 무관.
 
@@ -510,17 +548,17 @@ def _clean_organizer(text: str) -> str:
     if main:
         val = main.group(1).strip().strip(_ORG_BULLET).strip()
         if val and not _ORG_LABEL_ONLY.match(val):
-            return val
+            return _org_finalize(val)
     cleaned = _ORG_INLINE_LABEL.sub(" / ", raw)
     cleaned = _strip_org_label(cleaned)
     parts = [_strip_org_label(p) for p in _ORG_SPLIT.split(cleaned)]
     parts = [p for p in parts if p and not _ORG_LABEL_ONLY.match(p)]
     if parts:
-        return parts[0]
+        return _org_finalize(parts[0])
     fb = lead_stripped.strip(_ORG_BULLET).strip()
     if fb and not _ORG_LABEL_ONLY.match(fb):
-        return fb
-    return raw
+        return _org_finalize(fb)
+    return _org_finalize(raw)
 
 
 def extract_clean_value(text: str, field: str) -> str:
