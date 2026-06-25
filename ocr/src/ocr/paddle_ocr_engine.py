@@ -100,6 +100,8 @@ class PaddleOCREngine:
         #   Render 같은 CPU 서버 배포에서 /api/scan 500 을 막는 핵심 설정.
         options = {
             "lang": lang,
+            "text_detection_model_name": "PP-OCRv5_mobile_det",
+            "text_recognition_model_name": "korean_PP-OCRv5_mobile_rec",
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
@@ -110,6 +112,8 @@ class PaddleOCREngine:
         try:
             self.ocr = PaddleOCR(**options)
         except TypeError:
+            options.pop("text_detection_model_name", None)
+            options.pop("text_recognition_model_name", None)
             options.pop("use_textline_orientation", None)
             try:
                 self.ocr = PaddleOCR(**options)
