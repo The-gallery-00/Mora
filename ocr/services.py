@@ -224,6 +224,54 @@ def _pick_poster_title(blocks: list[dict]) -> int | None:
     return best[0]
 
 
+_NONTITLE_FIELDS = {"organizer_name", "location", "event_start_date", "event_end_date",
+                    "contact_phone", "contact_email", "website_url"}
+
+# 포스터 섹션헤더/자격·안내 문구(제목 밴드 회수 시 제외 — 제목 아님).
+_TITLE_SECTION = re.compile(
+    r"참가\s*자격|참가\s*대상|응모\s*자격|지원\s*자격|공모\s*주제|공모\s*분야|공모\s*부문|"
+    r"공모\s*개요|공모\s*기간|시상\s*내역|시상\s*내용|시상\s*규모|구\s*분|문\s*의|"
+    r"접수\s*기간|접수\s*방법|신청\s*방법|제출\s*서류|심사\s*기준|모집\s*기간|"
+    r"규\s*격|분\s*량|작품\s*요강|유의\s*사항|주의\s*사항|관심\s*있|누구나|국민\s*누구")
+
+# 기관/단체/기업 이름 접미사 패턴(하드코딩 리스트 아님 — '고흥군 운동대회' 같은 제목은 안 걸림,
+# 단독 기관명 블록만 매치). 주최/주관 추출 강화에 사용.
+_ORG_SUFFIX = re.compile(
+    r"대학교|대학|재단|협회|학회|진흥회|진흥원|연구원|연구소|공사|위원회|중앙회|연합회|"
+    r"문화원|문화재단|사업단|장학회|봉사단|복지관|그룹|방송|은행|\(주\)|㈜|주식회사|"
+    r"[가-힣]{2,5}(?:군|시|구|도)\b|교육청|시청|군청|도청|구청|YMCA|YWCA|EBS|KBS|MBC|SBS")
+# 기관전용 접미사(주소와 모호한 bare 시/군/구/도 제외) — fallback(cue 없는) 경로용.
+_ORG_SUFFIX_STRICT = re.compile(
+    r"대학교|대학|재단|협회|학회|진흥회|진흥원|연구원|연구소|공사|위원회|중앙회|연합회|"
+    r"문화원|문화재단|사업단|장학회|봉사단|복지관|그룹|방송|은행|\(주\)|㈜|주식회사|"
+    r"교육청|시청|군청|도청|구청|YMCA|YWCA|EBS|KBS|MBC|SBS")
+# '주최/주관' 단독 라벨 블록(값은 다음 블록) — 후원/협찬은 제외(주최·주관만 organizer).
+_ORG_LABEL_ONLY = re.compile(r"^\s*(주\s*최|주\s*관|주최\s*[·/]\s*주관|주최\s*및\s*주관)\s*[|｜:：·\-]*\s*$")
+# 본문 라인 지표(신청안내/조건 등) → organizer 후보 제외(fallback 경로용)
+_ORG_BODY = re.compile(
+    r"신청|모집|문의|접수|마감|일정|대상|자격|제출|시상|심사|선발|참가|기간|상금|"
+    r"http|@|\d{3,}|만원|공모|주제|분야|내용|혜택")
+
+
+def _pick_anchor(cand):
+    """제목 anchor(기준 블록) 선택. 기본은 '가장 큰 글자'지만, 모델 title 확률이
+    있으면 title 같지 않은 큰 블록(주최기관명 등)을 anchor 로 잘못 잡지 않도록
+    title-prob 가 어느정도(≥0.1) 있는 후보 중 가장 큰 것을 고른다.
+    확률정보 없으면(synth/eval) 최대높이 = 기존 동작(회귀안전)."""
+    if any(c[4] is not None for c in cand):
+        titley = [c for c in cand if (c[4] or 0.0) >= 0.1]
+        if titley:
+            return max(titley, key=lambda c: c[1])
+    return max(cand, key=lambda c: c[1])
+
+
+def _is_clear_nontitle(block: dict) -> bool:
+    """모델이 제목 아닌 특정 필드(주최/날짜/장소/연락처/URL)로 분류한 블록.
+    제목밴드(같은 폰트 행)에 섞여도 제외 → 하드코딩 없이 의미적 선별.
+    title/unknown 은 유지(멀티블록 제목·스타일조각 보존)."""
+    return block.get("field") in _NONTITLE_FIELDS
+
+
 def _pick_poster_title_band(blocks: list[dict]) -> list[int]:
     """포스터 제목 '밴드'를 bbox 로 묶어 인덱스 목록 반환(멀티블록 제목).
 
@@ -243,7 +291,7 @@ def _pick_poster_title_band(blocks: list[dict]) -> list[int]:
         if bi is not None:
             idx_counts[bi] = idx_counts.get(bi, 0) + 1
 
-    cand = []  # (i, height, cy, cx)
+    cand = []  # (i, height, cy, cx, title_prob)
     for i, b in enumerate(blocks):
         bi = b.get("block_index")
         if bi is not None and idx_counts.get(bi, 0) > 1:
@@ -260,12 +308,26 @@ def _pick_poster_title_band(blocks: list[dict]) -> list[int]:
         if h <= 0:
             continue
         xs = [p[0] for p in b["bbox"]]
-        cand.append((i, h, sum(ys) / len(ys), sum(xs) / len(xs)))
+        cand.append((i, h, sum(ys) / len(ys), sum(xs) / len(xs), b.get("_title_prob")))
     if not cand:
         return []
 
-    _, ah, acy, _ = max(cand, key=lambda c: c[1])
+    _, ah, acy, _, _ = max(cand, key=lambda c: c[1])
     band = [c for c in cand if c[1] >= 0.6 * ah and abs(c[2] - acy) <= 2.0 * ah]
+    # 세로 인접한 '브랜드/제목 윗줄'(예: '아이즈모바일' 위 → '영상 공모전') 회수:
+    # 밴드에 세로로 붙어있고(±1.2*anchor) 충분히 큰(≥0.33*anchor) 블록을 추가.
+    # 단 섹션헤더(참가자격/공모주제/시상내역 등)·작은 자격문구는 제외(=한 뭉탱이로 묶기).
+    if band:
+        _bcy = [c[2] for c in band]
+        _top, _bot = min(_bcy), max(_bcy)
+        _bset = set(id(c) for c in band)
+        _ext = [c for c in cand if id(c) not in _bset
+                and c[1] >= 0.33 * ah
+                and (_top - 1.2 * ah) <= c[2] <= (_bot + 1.2 * ah)
+                and not _TITLE_SECTION.search(blocks[c[0]].get("text", ""))
+                and not DATE_PATTERN.search(blocks[c[0]].get("text", ""))
+                and not re.search(r"\d{2,}|만\s*원|@|http", blocks[c[0]].get("text", ""))]
+        band = band + _ext
     # 한글 우선: 밴드에 한글 블록이 있으면 영어전용(슬로건/로고/태그라인) 블록 제외.
     # 한국 행사 포스터 제목은 한글(영문 약어는 한글 블록에 섞여 있어 보존됨).
     kor = [c for c in band if re.search(r"[가-힣]", blocks[c[0]].get("text", ""))]
@@ -462,6 +524,53 @@ class ParsingSkill:
                         ml_classified.append(end)
                     break
 
+            # 종료일 보충(start 유무 무관): 범위표기(A~B, 날짜 2개)면 두번째 날짜를 종료일로.
+            # 모델이 start 만 라벨하고 끝나는 케이스(접수 2026.07.01~07.20)에서 end 누락 방지.
+            # _clean_event_date(role=end) 가 범위서 종료일 추출(연도 상속) → 같은 블록 복제만.
+            if "event_end_date" not in {e.get("field") for e in ml_classified}:
+                for e in list(ml_classified):
+                    if e.get("field") not in ("event_start_date", "unknown"):
+                        continue
+                    dm = [m.group() for m in DATE_PATTERN.finditer(e.get("text", ""))]
+                    if len(dm) >= 2:
+                        end = dict(e)
+                        end["field"] = "event_end_date"
+                        ml_classified.append(end)
+                        break
+            # 시작일 보충(end 만 있는 경우): 모델이 범위를 event_end 로 라벨 → 첫 날짜를 start 로.
+            if "event_start_date" not in {e.get("field") for e in ml_classified}:
+                for e in list(ml_classified):
+                    if e.get("field") not in ("event_end_date", "unknown"):
+                        continue
+                    dm = [m.group() for m in DATE_PATTERN.finditer(e.get("text", ""))]
+                    if len(dm) >= 2:
+                        st = dict(e)
+                        st["field"] = "event_start_date"
+                        ml_classified.append(st)
+                        break
+            # 분절 날짜 재조합: 연도("2026.")와 'M.D~M.D' 범위가 따로 OCR된 경우.
+            # start 가 월·일 없이(연도만) 잡혔으면 → 연도 + 범위블록 재구성으로 start/end 확정.
+            def _has_md(t):
+                return bool(re.search(r"(?<!\d)\d{1,2}\s*[.\-/월]\s*\d{1,2}", t))
+            _start_ok = any(e.get("field") == "event_start_date" and _has_md(e.get("text", ""))
+                            for e in ml_classified)
+            if not _start_ok:
+                _ym = next((re.search(r"20\d{2}", e.get("text", "")) for e in ml_classified
+                            if re.search(r"20\d{2}", e.get("text", ""))), None)
+                _yr = _ym.group() if _ym else None
+                if _yr:
+                    for e in ml_classified:
+                        mds = re.findall(r"(?<!\d)(\d{1,2})\s*[.\-/월]\s*(\d{1,2})", e.get("text", ""))
+                        mds = [(int(a), int(b)) for a, b in mds if 1 <= int(a) <= 12 and 1 <= int(b) <= 31]
+                        if len(mds) >= 2 and not re.search(r"규격|가로|세로|1080|1920", e.get("text", "")):
+                            for x in ml_classified:
+                                if x.get("field") in ("event_start_date", "event_end_date"):
+                                    x["field"] = "unknown"
+                            for (mm, dd), fld in ((mds[0], "event_start_date"), (mds[-1], "event_end_date")):
+                                ml_classified.append({"text": f"{_yr}-{mm:02d}-{dd:02d}", "confidence": 0.9,
+                                                      "bbox": None, "block_index": -1, "field": fld})
+                            break
+
             # ML 이 놓친 장소 보충: 장소/위치 라벨(어디든) 또는 대학+건물 venue 패턴.
             if "location" not in present:
                 for e in ml_classified:
@@ -472,6 +581,45 @@ class ParsingSkill:
                             or (re.search(r"대학교|대학|캠퍼스", t)
                                 and re.search(r"캠퍼스|[0-9]+\s*호|관|홀|빌딩|센터|타워", t))):
                         e["field"] = "location"
+                        break
+
+            # 주최/주관 추출 강화: 모델이 organizer 못 잡거나 주최/주관 라벨 블록이 있으면 보충.
+            # 하드코딩 리스트 아님 — '주최/주관 cue' + 기관명 접미사 패턴(군/시/재단/협회/청 등).
+            _org_present = any(e.get("field") == "organizer_name" for e in ml_classified)
+            # 1) 주최/주관/후원 cue 가 든 unknown 블록 → organizer (고정밀, 라벨은 _clean 이 제거).
+            for e in ml_classified:
+                if e.get("field") != "unknown":
+                    continue
+                t = e.get("text", "")
+                if re.search(r"주\s*최|주\s*관|후\s*원", t) and _ORG_SUFFIX.search(t) \
+                        and not re.search(r"http|@", t):
+                    e["field"] = "organizer_name"
+                    _org_present = True
+            # 1.5) '주최/주관' 단독 라벨 블록 → 바로 다음 기관명 블록을 organizer(하단 라벨-값 분리 레이아웃).
+            for idx, e in enumerate(ml_classified):
+                if not _ORG_LABEL_ONLY.match((e.get("text") or "").strip()):
+                    continue
+                for e2 in ml_classified[idx + 1:idx + 3]:
+                    if e2.get("field") != "unknown":
+                        continue
+                    t2 = (e2.get("text") or "").strip()
+                    if (_ORG_SUFFIX_STRICT.search(t2) and not _ORG_BODY.search(t2)
+                            and 2 <= len(re.sub(r"\s+", "", t2)) <= 20):
+                        e2["field"] = "organizer_name"
+                        _org_present = True
+                        break
+            # 2) 모델·cue 둘다 organizer 못잡음 → 기관전용 접미사 블록(본문/주소 아님) 1개 보충.
+            #    bare 시/군/구/도(주소와 모호)는 제외 — venue/location 오인 방지(cktest loc 회귀 차단).
+            if not _org_present:
+                for e in ml_classified:
+                    if e.get("field") != "unknown":
+                        continue
+                    t = (e.get("text") or "").strip()
+                    nl = len(re.sub(r"\s+", "", t))
+                    if (_ORG_SUFFIX_STRICT.search(t) and not _ORG_BODY.search(t)
+                            and not re.search(r"[0-9]+\s*[호층]|로\s*[0-9]|[0-9]+\s*길|캠퍼스", t)
+                            and 2 <= nl <= 20):
+                        e["field"] = "organizer_name"
                         break
 
         return ml_classified

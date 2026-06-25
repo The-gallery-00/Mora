@@ -1,0 +1,10 @@
+{
+  "model_type": "transformer_sequence_classification",
+  "specialized": "POSTER",
+  "init_from": "C:\\Users\\user\\Desktop\\MORA_claude_ocr\\ocr\\models\\field_extractor",
+  "data": "C:\\Users\\user\\Desktop\\MORA_claude_ocr\\eval\\ocr_mod\\ml\\data_poster_v8",
+  "epochs": 3.0,
+  "lr": 2e-05,
+  "train_rows": 40806,
+  "seed": 42
+}
