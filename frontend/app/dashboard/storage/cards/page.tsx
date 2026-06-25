@@ -10,10 +10,10 @@ import {
   deleteCard,
   moveCardToGroup,
   updateCard,
-  getDocumentImageUrl,
 } from '@/lib/api'
 import type { BusinessCard, BusinessCardGroup } from '@/types'
 
+const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
 type ActiveGroup = 'all' | 'ungrouped' | string
 
 export default function StorageCardsPage() {
@@ -363,7 +363,7 @@ export default function StorageCardsPage() {
                       {card.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={getDocumentImageUrl(card.imageUrl)}
+                          src={card.imageUrl.startsWith('http') ? card.imageUrl : `${IMAGE_BASE}${card.imageUrl}`}
                           alt={card.name}
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
@@ -543,7 +543,7 @@ export default function StorageCardsPage() {
                 }}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={getDocumentImageUrl(selectedCard.imageUrl)}
+                    src={selectedCard.imageUrl.startsWith('http') ? selectedCard.imageUrl : `${IMAGE_BASE}${selectedCard.imageUrl}`}
                     alt={selectedCard.name}
                     style={{
                       width: '100%',
