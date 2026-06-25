@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { getMyTickets, deleteTicket, updateTicket } from "@/lib/api";
 import type { TicketResponse } from "@/types";
@@ -62,6 +62,13 @@ export default function StorageTicketsPage() {
     "arrivalTime",
   ];
 
+  const loadTickets = useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoading(true);
+    const res = await getMyTickets(0, 100);
+    if (res.success) setTickets(res.data);
+    if (showLoading) setIsLoading(false);
+  }, []);
+
   function openDrawer(t: TicketResponse | null) {
     setSelectedTicket(t);
     setSelectedBlockIdx(null);
@@ -103,14 +110,27 @@ export default function StorageTicketsPage() {
   }
 
   useEffect(() => {
-    async function load() {
-      setIsLoading(true);
-      const res = await getMyTickets(0, 100);
-      if (res.success) setTickets(res.data);
-      setIsLoading(false);
-    }
-    load();
-  }, []);
+    void loadTickets();
+
+    const refreshQuietly = () => {
+      void loadTickets(false);
+    };
+    const refreshForUpload = (event: Event) => {
+      const documentType = (event as CustomEvent<{ documentType?: string }>).detail
+        ?.documentType;
+      if (!documentType || documentType === "TICKET") refreshQuietly();
+    };
+
+    window.addEventListener("focus", refreshQuietly);
+    window.addEventListener("pageshow", refreshQuietly);
+    window.addEventListener("mora-documents-updated", refreshForUpload);
+
+    return () => {
+      window.removeEventListener("focus", refreshQuietly);
+      window.removeEventListener("pageshow", refreshQuietly);
+      window.removeEventListener("mora-documents-updated", refreshForUpload);
+    };
+  }, [loadTickets]);
 
   async function handleDelete(id: string) {
     const res = await deleteTicket(id);

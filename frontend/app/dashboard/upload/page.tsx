@@ -146,6 +146,7 @@ export default function UploadPage() {
     setIsSaving(false)
 
     if (res.success) {
+      window.dispatchEvent(new CustomEvent('mora-documents-updated', { detail: { documentType } }))
       setSaveMessage(res.message || null)
       setIsSaved(true)
     } else {
