@@ -5,6 +5,23 @@ import { useRouter } from 'next/navigation'
 import { getMyPosters, deletePoster, updatePoster } from '@/lib/api'
 import type { PosterResponse } from '@/types'
 
+const IMAGE_BASE = process.env.NEXT_PUBLIC_OCR_URL || 'http://localhost:8000'
+
+function getImageUrl(poster: PosterResponse): string {
+  if (poster.imageUrl) return poster.imageUrl
+  try {
+    const parsed = JSON.parse(poster.parsedJson || '{}')
+    return parsed.imageUrl || ''
+  } catch {
+    return ''
+  }
+}
+
+function getFullImageUrl(imageUrl: string): string {
+  if (!imageUrl) return ''
+  return imageUrl.startsWith('http') ? imageUrl : `${IMAGE_BASE}${imageUrl}`
+}
+
 type EditableKey =
   | 'title' | 'organizerName' | 'eventStartDate' | 'eventEndDate'
   | 'contactPhone' | 'contactEmail' | 'location' | 'fee' | 'websiteUrl' | 'description'
@@ -112,12 +129,14 @@ export default function StoragePostersPage() {
 
       {!isLoading && posters.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {posters.map(p => (
+          {posters.map(p => {
+            const imgUrl = getFullImageUrl(getImageUrl(p))
+            return (
             <div
               key={p.id}
               onClick={() => openDrawer(selectedPoster?.id === p.id ? null : p)}
               style={{
-                display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr auto',
+                display: 'grid', gridTemplateColumns: '80px 2fr 1fr 1fr 1fr auto',
                 alignItems: 'center', gap: 16,
                 padding: '16px 20px', borderRadius: 12,
                 border: selectedPoster?.id === p.id ? '1px solid #0077B6' : '1px solid #CBD5E1',
@@ -125,6 +144,22 @@ export default function StoragePostersPage() {
                 cursor: 'pointer', transition: 'all 0.1s',
               }}
             >
+              <div style={{
+                width: 72, height: 48, borderRadius: 6, background: '#F1F5F9',
+                overflow: 'hidden', border: '1px solid #E2E8F0',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {imgUrl ? (
+                  <img
+                    src={imgUrl}
+                    alt="Poster"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 20, color: '#CBD5E1' }}>P</span>
+                )}
+              </div>
               <div>
                 <p style={{ fontSize: 14, fontWeight: 600, color: '#15293D' }}>
                   {p.title || '-'}
@@ -171,12 +206,14 @@ export default function StoragePostersPage() {
                 >✕</button>
               )}
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
       {selectedPoster && (() => {
         const view = isEditing && editDraft ? editDraft : selectedPoster
+        const selectedImageUrl = getFullImageUrl(getImageUrl(selectedPoster))
         const fields: Array<{ key: EditableKey; label: string; multiline?: boolean }> = [
           { key: 'title', label: '제목' },
           { key: 'organizerName', label: '주최자' },
@@ -231,6 +268,20 @@ export default function StoragePostersPage() {
                   </div>
                 </div>
               </div>
+
+              {selectedImageUrl && (
+                <div style={{
+                  borderRadius: 12, overflow: 'hidden',
+                  marginBottom: 4, border: '1px solid #E2E8F0',
+                  background: '#F8FAFC',
+                }}>
+                  <img
+                    src={selectedImageUrl}
+                    alt="Poster original"
+                    style={{ width: '100%', display: 'block' }}
+                  />
+                </div>
+              )}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: isEditing ? 14 : 0 }}>
                 {fields.map(f => {
