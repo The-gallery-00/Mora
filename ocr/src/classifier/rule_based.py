@@ -78,6 +78,18 @@ LANDLINE_PATTERN = re.compile(r"0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}")
 # extract_clean_value 에서 라벨/괄호가 섞인 원문에서 번호만 뽑을 때 사용.
 _PHONE_LOOSE = re.compile(r"\(?0\d{1,2}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}")
 
+# 국제표기 한국 전화: "+82 53-000-0000", "+82(0) 53 754 7534", "+82-10-1234-5678".
+# +82 가 국내 trunk '0' 을 대체(또는 "(0)" 으로 병기)하므로 패턴/분류/정규화가 모두
+# 미스 → 국내표기(0 으로 시작)로 환원해야 기존 MOBILE/LANDLINE/LOOSE 가 그대로 동작.
+_INTL_KR_PREFIX = re.compile(r"\+\s*82[\s().\-]*0?[\s().\-]*(?=\d)")
+
+
+def _intl_to_domestic(text: str) -> str:
+    """문자열 내 '+82[ (0) ]' 국제표기 한국전화 prefix 를 국내 trunk '0' 으로 환원.
+    예) '+82 53-000-0000'→'053-000-0000', '+82(0) 53 754 7534'→'053 754 7534',
+        '+82-10-1234-5678'→'010-1234-5678'. 한국전화 외 텍스트는 영향 없음."""
+    return _INTL_KR_PREFIX.sub("0", text)
+
 # 팩스 키워드
 FAX_KEYWORDS = re.compile(r"(?i)(fax|팩스|f\s*[:.]|FAX\s*[:.)])")
 
@@ -294,18 +306,21 @@ def classify_text_block(text: str, all_blocks: list[dict] = None, block_index: i
     if WEBSITE_PATTERN.search(text_stripped):
         return "website"
 
+    # 3~5) 전화/팩스 — 국제표기(+82) 는 국내표기(0)로 환원 후 패턴 매칭
+    phone_text = _intl_to_domestic(text_stripped)
+
     # 3) 팩스 확인 — 팩스 키워드 + 전화번호 패턴이 동시에 존재
-    if FAX_KEYWORDS.search(text_stripped) and LANDLINE_PATTERN.search(text_stripped):
+    if FAX_KEYWORDS.search(text_stripped) and LANDLINE_PATTERN.search(phone_text):
         return "fax_number"
 
     # 4) 휴대폰 번호 확인 — 010/011/016/017/018/019로 시작하는 번호
-    if MOBILE_PATTERN.search(text_stripped):
+    if MOBILE_PATTERN.search(phone_text):
         if FAX_KEYWORDS.search(text_stripped):
             return "fax_number"
         return "mobile_phone"
 
     # 5) 일반 전화번호 / 팩스 판별 — 0으로 시작하는 유선 번호
-    if LANDLINE_PATTERN.search(text_stripped):
+    if LANDLINE_PATTERN.search(phone_text):
         if FAX_KEYWORDS.search(text_stripped):
             return "fax_number"
         if PHONE_KEYWORDS.search(text_stripped):
@@ -579,12 +594,14 @@ def extract_clean_value(text: str, field: str) -> str:
         loose = re.search(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9._\-]+", text)
         return loose.group() if loose else ""
     if field in ("mobile_phone", "office_phone", "contact_phone"):
-        match = (MOBILE_PATTERN.search(text) or LANDLINE_PATTERN.search(text)
-                 or _PHONE_LOOSE.search(text))
+        t = _intl_to_domestic(text)   # +82 국제표기 → 국내(0) 환원 후 추출
+        match = (MOBILE_PATTERN.search(t) or LANDLINE_PATTERN.search(t)
+                 or _PHONE_LOOSE.search(t))
         return _normalize_phone(match.group()) if match else ""   # 전화 패턴 없으면 드롭
     if field == "fax_number":
-        match = (LANDLINE_PATTERN.search(text) or MOBILE_PATTERN.search(text)
-                 or _PHONE_LOOSE.search(text))
+        t = _intl_to_domestic(text)
+        match = (LANDLINE_PATTERN.search(t) or MOBILE_PATTERN.search(t)
+                 or _PHONE_LOOSE.search(t))
         return _normalize_phone(match.group()) if match else ""
     if field == "total_amount":
         return _clean_amount(text)
@@ -1041,8 +1058,9 @@ def classify_text_block_for_poster(text: str) -> str:
     if WEBSITE_PATTERN.search(text_stripped):
         return "website_url"
 
-    # 3) 전화번호 확인 (휴대폰 또는 유선)
-    if MOBILE_PATTERN.search(text_stripped) or LANDLINE_PATTERN.search(text_stripped):
+    # 3) 전화번호 확인 (휴대폰 또는 유선) — +82 국제표기 환원 후 매칭
+    _ptext = _intl_to_domestic(text_stripped)
+    if MOBILE_PATTERN.search(_ptext) or LANDLINE_PATTERN.search(_ptext):
         return "contact_phone"
 
     # 4) 주최/주관 키워드 확인
