@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleChevronLeft, CircleChevronRight } from "lucide-react";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { getMyCards, getMyTickets, getMyPosters } from "@/lib/api";
 import type { TicketResponse, PosterResponse } from "@/types";
 
@@ -126,6 +126,7 @@ function getWeekendColor(dayOfWeek: number) {
 
 export default function DashboardPage() {
   const today = useMemo(() => new Date(), []);
+  const deadlineScrollRef = useRef<HTMLDivElement | null>(null);
   const [currentMonth, setCurrentMonth] = useState(today.getMonth());
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
@@ -146,6 +147,36 @@ export default function DashboardPage() {
   const setSelectedDate = (date: null) => {
     if (date === null) setSelectedDateKey(null);
   };
+
+  useEffect(() => {
+    const container = deadlineScrollRef.current;
+    if (!container) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      const maxScrollLeft = container.scrollWidth - container.clientWidth;
+      if (maxScrollLeft <= 0) return;
+
+      const wheelDelta =
+        Math.abs(event.deltaX) > Math.abs(event.deltaY)
+          ? event.deltaX
+          : event.deltaY;
+
+      if (wheelDelta === 0) return;
+
+      const nextScrollLeft = Math.max(
+        0,
+        Math.min(maxScrollLeft, container.scrollLeft + wheelDelta),
+      );
+
+      if (nextScrollLeft !== container.scrollLeft) {
+        event.preventDefault();
+        container.scrollLeft = nextScrollLeft;
+      }
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, [deadlineCards.length, isLoading]);
 
   useEffect(() => {
     async function fetchData() {
@@ -706,6 +737,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div
+            ref={deadlineScrollRef}
             style={{
               display: "flex",
               gap: 16,
