@@ -124,6 +124,35 @@ export async function scanCard(file: File): Promise<ApiResponse<BusinessCard>> {
   }
 }
 
+/**
+ * 확인 & 저장 시점에만 호출. 원본 이미지를 OCR /commit 으로 재전송하여
+ * uploads/{종류}/ 에 영구 저장하고 ner_dataset 라벨을 누적한 뒤 image_url 을 받는다.
+ * (업로드/스캔 단계에서는 어떤 데이터도 누적되지 않는다.)
+ */
+export async function commitDocument(
+  file: File,
+  documentType: DocumentType,
+  rawBlocks: { text: string; confidence: number }[] = [],
+  correctedFields: Record<string, string> = {},
+): Promise<ApiResponse<{ image_url: string; count: number }>> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('document_type', documentType)
+    formData.append('raw_blocks', JSON.stringify(rawBlocks))
+    formData.append('corrected_fields', JSON.stringify(correctedFields))
+
+    const res = await fetch(`${OCR_BASE}/api/commit`, { method: 'POST', body: formData })
+    const json = await res.json().catch(() => null)
+    if (!res.ok || !json?.success) {
+      return { success: false, error: json?.error || `이미지 저장 실패 (${res.status})` }
+    }
+    return { success: true, data: json.data }
+  } catch {
+    return { success: false, error: 'OCR 서버에 연결할 수 없습니다.' }
+  }
+}
+
 /** 문서 데이터를 DB에 저장. 문서 종류에 따라 다른 엔드포인트로 분기 */
 export async function saveCard(
   documentType: DocumentType,
@@ -132,8 +161,22 @@ export async function saveCard(
   rawTexts: string[] = [],
   rawBlocks: { text: string; confidence: number }[] = [],
   confidence: number = 0,
+  file: File | null = null,
 ): Promise<ApiResponse<{ id: string }>> {
   try {
+    const SUPPORTED: DocumentType[] = ['TICKET', 'POSTER', 'BUSINESS_CARD', 'RECEIPT']
+    if (!SUPPORTED.includes(documentType)) {
+      return { success: false, error: '지원하지 않는 문서 유형입니다.' }
+    }
+
+    // 확인&저장 확정 시점에만 이미지+라벨을 영구 저장하고 image_url 을 확보한다.
+    if (file) {
+      const committed = await commitDocument(file, documentType, rawBlocks, fields)
+      if (committed.success) {
+        imageUrl = committed.data.image_url || imageUrl
+      }
+    }
+
     let url: string
     let body: Record<string, unknown>
 
@@ -221,18 +264,7 @@ export async function saveCard(
       return { success: false, error: json?.error || `저장 실패 (${res.status})` }
     }
 
-    // NER 학습 데이터 축적 (비동기, 실패해도 무시)
-    fetch(`${OCR_BASE}/api/ner-label`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        document_type: documentType,
-        image_url: imageUrl,
-        raw_blocks: rawBlocks,
-        corrected_fields: fields,
-      }),
-    }).catch(() => {})
-
+    // NER 라벨 누적 + 이미지 영구 저장은 위의 commitDocument(/commit)에서 이미 처리됨.
     return { success: true, data: json.data, message: json.message }
   } catch {
     return { success: false, error: '백엔드 서버에 연결할 수 없습니다.' }

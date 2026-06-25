@@ -141,7 +141,8 @@ export default function UploadPage() {
     const res = await saveCard(documentType, editFields, imageUrl,
       ocrScanResult?.rawTexts || [],
       ocrScanResult?.rawBlocks || [],
-      confidence)
+      confidence,
+      file)
     setIsSaving(false)
 
     if (res.success) {

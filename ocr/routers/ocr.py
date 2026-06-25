@@ -9,15 +9,22 @@
 #
 # [코드 흐름]
 # 1) 클라이언트가 POST /api/scan 으로 이미지 파일을 업로드한다
-# 2) 파일명을 UUID로 변환하여 uploads 디렉토리에 저장한다
+# 2) 영구 저장하지 않고 임시 파일로만 받아 OCR 처리 후 즉시 삭제한다
 # 3) pipeline.run()으로 OCR을 수행하여 텍스트 블록을 추출한다
 # 4) parsing_skill.execute()로 텍스트 블록을 명함 필드로 분류한다
-# 5) 파싱 결과, 원본 블록, 이미지 URL을 JSON으로 반환한다
+# 5) 파싱 결과, 원본 블록을 JSON으로 반환한다 (image_url 은 비어 있음)
 # 6) 에러 발생 시 500 상태 코드와 에러 메시지를 반환한다
+#
+# 7) 사용자가 "확인 & 저장" 시 POST /api/commit 으로 원본 이미지를
+#    재전송하면, 이때 비로소 uploads/{종류}/ 에 영구 저장하고
+#    ner_dataset 에 라벨 데이터를 축적한다. (업로드 시점에는 누적 안 함)
 #
 # [메서드 목록]
 # - scan(file): POST /scan 엔드포인트.
-#     업로드된 이미지를 저장 → OCR → 파싱 → 결과 반환
+#     업로드 이미지를 임시 처리 → OCR → 파싱 → 결과 반환 (저장 안 함)
+# - commit_document(...): POST /commit 엔드포인트.
+#     확인&저장 시점에 이미지 영구 저장 + NER 라벨 누적
+# - save_ner_label(...): POST /ner-label 엔드포인트 (하위 호환, 라벨만 저장)
 #
 # [사용된 라이브러리]
 # ───────────────────────────────────────────
@@ -52,12 +59,14 @@
 #
 # ═══════════════════════════════════════════════════════════════
 
-"""OCR router — POST /scan, POST /ner-label."""
+"""OCR router — POST /scan, POST /commit, POST /ner-label."""
+import os
 import time
 import uuid
 import hashlib
 import shutil
 import json
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -66,7 +75,7 @@ import torch.nn as nn
 from torchvision import transforms, models
 from PIL import Image, ImageOps
 
-from fastapi import APIRouter, File, UploadFile, Body
+from fastapi import APIRouter, File, UploadFile, Body, Form
 from fastapi.responses import JSONResponse
 
 # services.py에서 lazy 생성되는 파이프라인과 파싱 스킬을 가져옴
@@ -75,8 +84,8 @@ from src.classifier.field_schema import DOCUMENT_FIELDS, FIELD_LABELS_KO
 
 router = APIRouter()
 
-# 업로드 디렉토리 경로 설정 (프로젝트 루트/uploads)
-UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads"
+# 업로드 디렉토리 경로 설정 (ocr/uploads — 확인&저장 시점에만 영구 저장됨)
+UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 MAX_IMAGE_SIDE = 1280
 
 # ===== 분류 모델 로드 (최초 요청 시 1회) =====
@@ -207,9 +216,17 @@ def classify_image(image_path: str) -> tuple[str, float]:
     return document_type, confidence
 
 
-# NER 학습 데이터 저장 디렉토리
-NER_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "ner_dataset"
+# NER 학습 데이터 저장 디렉토리 (ocr/ner_dataset)
+NER_DATA_DIR = Path(__file__).resolve().parent.parent / "ner_dataset"
 NER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# 저장 경로에 쓰일 문서 종류 화이트리스트 (외부 입력 기반 경로 조합 → 디렉토리 탈출 방지)
+ALLOWED_DOC_TYPES = {"BUSINESS_CARD", "POSTER", "RECEIPT", "TICKET", "ETC", "UNKNOWN"}
+
+
+def _safe_doc_type(document_type: str) -> str:
+    """허용된 문서 종류만 통과시키고, 그 외는 ETC로 대체 (경로 인젝션 차단)."""
+    return document_type if document_type in ALLOWED_DOC_TYPES else "ETC"
 
 # 이미지 해시 → 파일명 매핑 (중복 방지용)
 _hash_index_path = UPLOAD_DIR / ".hash_index.json"
@@ -240,35 +257,36 @@ def _save_hash_index(index: dict):
 
 @router.post("/scan")
 async def scan(file: UploadFile = File(...)):
-    """이미지를 받아 중복 체크 → OCR → 티켓 감지/분류 → 파싱 결과를 반환."""
+    """이미지를 받아 OCR → 티켓 감지/분류 → 파싱 결과를 반환.
+
+    업로드 시점에는 어떤 데이터도 영구 저장하지 않는다.
+    이미지는 시스템 임시 파일로만 받아 처리 후 즉시 삭제하며,
+    영구 저장(uploads)·NER 라벨 누적(ner_dataset)은
+    사용자가 "확인 & 저장"할 때 POST /api/commit 에서 수행한다.
+    """
     request_id = uuid.uuid4().hex[:8]
     request_started_at = time.perf_counter()
     last_at = log_timing(request_id, "request_start", request_started_at)
 
-    # 원본 확장자를 유지하면서 UUID 기반 고유 파일명 생성
+    # 원본 확장자를 유지하되 uploads 가 아닌 시스템 임시 파일로만 저장
     suffix = Path(file.filename).suffix or ".jpg"
-    img_name = f"{uuid.uuid4().hex}{suffix}"
-
-    # 임시로 UPLOAD_DIR에 저장 (분류 후 이동)
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    temp_path = UPLOAD_DIR / img_name
-    with open(temp_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    last_at = log_timing(request_id, "image_saved", request_started_at, last_at)
-
-    image_info = normalize_uploaded_image(temp_path)
-    print(
-        f"[OCR:{request_id}] image_normalized resized={image_info['resized']} "
-        f"original={image_info['original_size']} processed={image_info['processed_size']}",
-        flush=True,
-    )
-    last_at = log_timing(request_id, "image_preprocessed", request_started_at, last_at)
-
-    # 중복 이미지 체크 (해시 기록만 하고 차단은 하지 않음)
-    img_hash = _compute_image_hash(str(temp_path))
-    hash_index = _load_hash_index()
+    fd, tmp_name = tempfile.mkstemp(suffix=suffix, prefix="mora_scan_")
+    os.close(fd)
+    temp_path = Path(tmp_name)
 
     try:
+        with open(temp_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        last_at = log_timing(request_id, "image_saved_tmp", request_started_at, last_at)
+
+        image_info = normalize_uploaded_image(temp_path)
+        print(
+            f"[OCR:{request_id}] image_normalized resized={image_info['resized']} "
+            f"original={image_info['original_size']} processed={image_info['processed_size']}",
+            flush=True,
+        )
+        last_at = log_timing(request_id, "image_preprocessed", request_started_at, last_at)
+
         # Step 1: OCR 먼저 실행 (티켓 키워드 감지를 위해 분류보다 선행)
         print(f"[OCR:{request_id}] engine_get_start", flush=True)
         pipeline = get_pipeline()
@@ -288,13 +306,6 @@ async def scan(file: UploadFile = File(...)):
             document_type, confidence = classify_image(str(temp_path))
         last_at = log_timing(request_id, "classification_done", request_started_at, last_at)
 
-        # 종류별 폴더로 이동
-        type_dir = UPLOAD_DIR / document_type
-        type_dir.mkdir(parents=True, exist_ok=True)
-        img_path = type_dir / img_name
-        shutil.move(str(temp_path), str(img_path))
-        last_at = log_timing(request_id, "image_moved", request_started_at, last_at)
-
         # Step 3: 텍스트 블록을 문서 종류에 맞게 파싱
         parsed_result = parsing_skill.execute(text_blocks, document_type=document_type)
         parsed = parsed_result["parsed"]
@@ -306,14 +317,6 @@ async def scan(file: UploadFile = File(...)):
             for ext in DOCUMENT_FIELDS.get(document_type, {}).values()
         }
 
-        # 해시 인덱스에 등록 (중복 방지)
-        hash_index[img_hash] = {
-            "filename": img_name,
-            "type": document_type,
-            "path": f"{document_type}/{img_name}",
-        }
-        _save_hash_index(hash_index)
-        last_at = log_timing(request_id, "hash_index_saved", request_started_at, last_at)
         log_timing(request_id, "request_done", request_started_at, last_at)
 
         return JSONResponse(content={
@@ -325,25 +328,133 @@ async def scan(file: UploadFile = File(...)):
                 "items": items,
                 "fields": fields,
                 "raw_blocks": text_blocks,
-                "image_url": f"/uploads/{document_type}/{img_name}",
+                # 업로드 단계에서는 저장하지 않으므로 image_url 은 비어 있음.
+                # 영구 URL 은 확인&저장(/commit) 응답에서 받는다.
+                "image_url": "",
                 "image_size": ocr_result.get("image_size"),
             }
         })
     except Exception as e:
         log_timing(request_id, f"request_failed error={e}", request_started_at, last_at)
-        # 에러 시 임시 파일 정리
-        if temp_path.exists():
-            temp_path.unlink()
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+    finally:
+        # 임시 파일은 성공/실패와 무관하게 항상 삭제 (누적 방지)
+        temp_path.unlink(missing_ok=True)
+
+
+def _persist_image(file: UploadFile, document_type: str) -> tuple[str, str]:
+    """업로드 이미지를 uploads/{종류}/ 에 영구 저장하고 (파일명, image_url)을 반환.
+
+    확인&저장(/commit) 시점에만 호출된다. 정규화(EXIF/리사이즈)도 함께 수행하고,
+    중복 추적용 해시 인덱스에 등록한다.
+    """
+    suffix = Path(file.filename).suffix or ".jpg"
+    img_name = f"{uuid.uuid4().hex}{suffix}"
+
+    type_dir = UPLOAD_DIR / document_type
+    type_dir.mkdir(parents=True, exist_ok=True)
+    img_path = type_dir / img_name
+
+    with open(img_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    normalize_uploaded_image(img_path)
+
+    # 중복 추적용 해시 인덱스 등록 (기록만, 차단은 안 함)
+    img_hash = _compute_image_hash(str(img_path))
+    hash_index = _load_hash_index()
+    hash_index[img_hash] = {
+        "filename": img_name,
+        "type": document_type,
+        "path": f"{document_type}/{img_name}",
+    }
+    _save_hash_index(hash_index)
+
+    return img_name, f"/uploads/{document_type}/{img_name}"
+
+
+def _write_ner_label(document_type: str, image_url: str,
+                     raw_blocks: list, corrected_fields: dict) -> int:
+    """OCR 원본 블록 + 사용자 수정 정답을 ner_dataset 에 누적하고 총 건수를 반환."""
+    type_dir = NER_DATA_DIR / document_type
+    type_dir.mkdir(parents=True, exist_ok=True)
+
+    # 파일명: 타임스탬프 기반
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    label_path = type_dir / f"{timestamp}.json"
+
+    label_data = {
+        "document_type": document_type,
+        "image_url": image_url,
+        "raw_blocks": [
+            {"text": b.get("text", ""), "confidence": b.get("confidence", 0)}
+            for b in raw_blocks
+        ],
+        "corrected_fields": corrected_fields,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    with open(label_path, "w", encoding="utf-8") as f:
+        json.dump(label_data, f, ensure_ascii=False, indent=2)
+
+    count = len(list(type_dir.glob("*.json")))
+    print(f"[NER] {document_type} 라벨 저장 ({count}건 축적)")
+    return count
+
+
+@router.post("/commit")
+async def commit_document(
+    file: UploadFile = File(...),
+    document_type: str = Form("UNKNOWN"),
+    raw_blocks: str = Form("[]"),
+    corrected_fields: str = Form("{}"),
+):
+    """사용자가 "확인 & 저장"할 때 호출되는 영구 저장 엔드포인트.
+
+    업로드 시점(/scan)에는 아무것도 저장하지 않으므로, 확정된 이 시점에만
+    1) 원본 이미지를 uploads/{종류}/ 에 영구 저장하고
+    2) ner_dataset 에 학습 라벨을 누적한다.
+
+    multipart/form-data:
+      - file: 원본 이미지 (스캔 때 보냈던 그 파일을 재전송)
+      - document_type: "BUSINESS_CARD" | "POSTER" | "RECEIPT" | "TICKET"
+      - raw_blocks: OCR 원본 블록 JSON 문자열
+      - corrected_fields: 사용자가 수정/확인한 필드 JSON 문자열
+    응답 data: {"image_url": "/uploads/.../xxx.jpg", "count": 축적 건수}
+    """
+    try:
+        try:
+            blocks = json.loads(raw_blocks or "[]")
+            fields = json.loads(corrected_fields or "{}")
+        except json.JSONDecodeError as e:
+            return JSONResponse(status_code=400,
+                                content={"success": False, "error": f"잘못된 JSON: {e}"})
+
+        if not isinstance(blocks, list):
+            blocks = []
+        if not isinstance(fields, dict):
+            fields = {}
+
+        document_type = _safe_doc_type(document_type)
+
+        # 1) 이미지 영구 저장
+        _, image_url = _persist_image(file, document_type)
+
+        # 2) NER 라벨 누적 (블록/필드가 비어 있으면 라벨은 생략, 이미지는 유지)
+        count = 0
+        if blocks and fields:
+            count = _write_ner_label(document_type, image_url, blocks, fields)
+
+        return JSONResponse(content={
+            "success": True,
+            "data": {"image_url": image_url, "count": count},
+        })
+    except Exception as e:
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @router.post("/ner-label")
 async def save_ner_label(data: dict = Body(...)):
-    """
-    사용자가 수정/확인한 OCR 결과를 NER 학습 데이터로 저장.
-
-    프론트에서 "확인 & 저장" 시 이 엔드포인트도 호출하여
-    OCR 원본 블록 + 사용자 수정 정답을 축적한다.
+    """라벨만 누적하는 하위 호환 엔드포인트 (이미지 저장은 /commit 에서 수행).
 
     요청 body:
     {
@@ -354,7 +465,7 @@ async def save_ner_label(data: dict = Body(...)):
     }
     """
     try:
-        document_type = data.get("document_type", "UNKNOWN")
+        document_type = _safe_doc_type(data.get("document_type", "UNKNOWN"))
         image_url = data.get("image_url", "")
         raw_blocks = data.get("raw_blocks", [])
         corrected_fields = data.get("corrected_fields", {})
@@ -362,29 +473,7 @@ async def save_ner_label(data: dict = Body(...)):
         if not raw_blocks or not corrected_fields:
             return JSONResponse(content={"success": False, "error": "raw_blocks와 corrected_fields 필요"})
 
-        # 문서 종류별 디렉토리
-        type_dir = NER_DATA_DIR / document_type
-        type_dir.mkdir(parents=True, exist_ok=True)
-
-        # 파일명: 타임스탬프 기반
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        label_path = type_dir / f"{timestamp}.json"
-
-        label_data = {
-            "document_type": document_type,
-            "image_url": image_url,
-            "raw_blocks": [{"text": b["text"], "confidence": b.get("confidence", 0)} for b in raw_blocks],
-            "corrected_fields": corrected_fields,
-            "created_at": datetime.now().isoformat(),
-        }
-
-        with open(label_path, "w", encoding="utf-8") as f:
-            json.dump(label_data, f, ensure_ascii=False, indent=2)
-
-        # 현재 축적된 데이터 수 카운트
-        count = len(list(type_dir.glob("*.json")))
-        print(f"[NER] {document_type} 라벨 저장 ({count}건 축적)")
-
+        count = _write_ner_label(document_type, image_url, raw_blocks, corrected_fields)
         return JSONResponse(content={"success": True, "data": {"count": count}})
 
     except Exception as e:

@@ -49,10 +49,10 @@ target/
 .gradle/
 build/
 
-# ===== 업로드 파일 (이미지 등) =====
-uploads/*
-!uploads/.gitkeep
-ner_dataset/
+# ===== 업로드 파일 (이미지 등) — ocr/ 하위로 이동 =====
+ocr/uploads/*
+!ocr/uploads/.gitkeep
+ocr/ner_dataset/
 docs/.obsidian/
 docs/__MACOSX/
 
